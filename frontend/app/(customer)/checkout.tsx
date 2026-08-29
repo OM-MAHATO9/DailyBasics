@@ -3,9 +3,11 @@ import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "@/src/lib/api";
+import { api, auth } from "@/src/lib/api";
 import { useCart } from "@/src/lib/cart";
 import { theme, formatINR } from "@/src/lib/theme";
+import { fetchPaymentConfig, verifyRazorpay } from "@/src/lib/payments";
+import RazorpayCheckout from "@/src/components/RazorpayCheckout";
 
 export default function Checkout() {
   const router = useRouter();
@@ -22,6 +24,9 @@ export default function Checkout() {
   const [payMethod, setPayMethod] = useState("cod");
   const [err, setErr] = useState("");
   const [pincodeErr, setPincodeErr] = useState("");
+  const [payConfig, setPayConfig] = useState<{ razorpay_enabled: boolean; razorpay_key_id: string | null }>({ razorpay_enabled: false, razorpay_key_id: null });
+  const [rzpOrder, setRzpOrder] = useState<any>(null);
+  const [rzpUser, setRzpUser] = useState<any>({});
 
   useEffect(() => {
     api.addresses().then((a) => {
@@ -29,6 +34,8 @@ export default function Checkout() {
       if (a[0]) { setAddrId(a[0].id); checkPin(a[0].pincode); }
       else setShowForm(true);
     });
+    fetchPaymentConfig().then(setPayConfig).catch(() => {});
+    auth.getUser().then((u) => setRzpUser(u || {}));
   }, []);
 
   const checkPin = async (pin: string) => {
@@ -74,9 +81,45 @@ export default function Checkout() {
         coupon_code: couponInfo ? couponInfo.code : null,
         payment_method: payMethod,
       });
+      if (payMethod === "online") {
+        if (!order.razorpay_enabled) {
+          setErr(order.razorpay_message || "Online payment not configured");
+          setPlacing(false);
+          return;
+        }
+        setRzpOrder(order);
+        setPlacing(false);
+        return;
+      }
       clear();
       router.replace({ pathname: "/(customer)/order/[id]", params: { id: order.id } });
-    } catch (e: any) { setErr(e.message); } finally { setPlacing(false); }
+    } catch (e: any) { setErr(e.message); setPlacing(false); }
+  };
+
+  const onRzpSuccess = async (resp: any) => {
+    try {
+      await verifyRazorpay(rzpOrder.id, resp);
+      const orderId = rzpOrder.id;
+      setRzpOrder(null);
+      clear();
+      router.replace({ pathname: "/(customer)/order/[id]", params: { id: orderId } });
+    } catch (e: any) {
+      setErr(`Payment verify failed: ${e.message}. Order kept — you can retry from Orders.`);
+      setRzpOrder(null);
+    }
+  };
+  const onRzpFailure = (r: any) => {
+    setErr(`Payment failed: ${r?.description || "Please try again"}. Order kept.`);
+    setRzpOrder(null);
+  };
+  const onRzpDismiss = () => {
+    setErr("Payment cancelled. You can retry from your Orders.");
+    if (rzpOrder) {
+      const orderId = rzpOrder.id;
+      setRzpOrder(null);
+      clear();
+      router.replace({ pathname: "/(customer)/order/[id]", params: { id: orderId } });
+    }
   };
 
   return (
@@ -154,10 +197,21 @@ export default function Checkout() {
             <View style={{ flex: 1 }}><Text style={styles.payTitle}>Cash on Delivery</Text><Text style={styles.paySub}>Pay when your order arrives</Text></View>
             <View style={styles.radio}>{payMethod === "cod" && <View style={styles.radioDot} />}</View>
           </Pressable>
-          <Pressable style={[styles.payOpt, { opacity: 0.5 }]} disabled testID="pay-upi">
-            <Ionicons name="qr-code" size={22} color={theme.colors.onMuted} />
-            <View style={{ flex: 1 }}><Text style={styles.payTitle}>UPI / Online Payment</Text><Text style={styles.paySub}>Coming soon</Text></View>
-          </Pressable>
+          {payConfig.razorpay_enabled ? (
+            <Pressable style={[styles.payOpt, payMethod === "online" && styles.payActive]} onPress={() => setPayMethod("online")} testID="pay-online">
+              <Ionicons name="qr-code" size={22} color={theme.colors.brand} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.payTitle}>UPI / Card / Netbanking</Text>
+                <Text style={styles.paySub}>Powered by Razorpay • Instant</Text>
+              </View>
+              <View style={styles.radio}>{payMethod === "online" && <View style={styles.radioDot} />}</View>
+            </Pressable>
+          ) : (
+            <Pressable style={[styles.payOpt, { opacity: 0.5 }]} disabled testID="pay-online-disabled">
+              <Ionicons name="qr-code" size={22} color={theme.colors.onMuted} />
+              <View style={{ flex: 1 }}><Text style={styles.payTitle}>UPI / Card / Netbanking</Text><Text style={styles.paySub}>Razorpay keys not configured yet</Text></View>
+            </Pressable>
+          )}
 
           <View style={styles.bill}>
             <Text style={styles.billTitle}>Bill Summary</Text>
@@ -174,7 +228,7 @@ export default function Checkout() {
         <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
           <View style={{ flex: 1 }}>
             <Text style={styles.footTotal}>{formatINR(total)}</Text>
-            <Text style={styles.footNote}>{items.length} item{items.length > 1 ? "s" : ""} • {payMethod === "cod" ? "COD" : "Online"}</Text>
+            <Text style={styles.footNote}>{items.length} item{items.length > 1 ? "s" : ""} • {payMethod === "cod" ? "COD" : "UPI / Card"}</Text>
           </View>
           <Pressable
             style={[styles.placeBtn, (!deliveryInfo || placing) && { opacity: 0.5 }]}
@@ -182,10 +236,20 @@ export default function Checkout() {
             disabled={!deliveryInfo || placing}
             testID="place-order-btn"
           >
-            {placing ? <ActivityIndicator color="#fff" /> : <Text style={styles.placeText}>Place Order</Text>}
+            {placing ? <ActivityIndicator color="#fff" /> : <Text style={styles.placeText}>{payMethod === "online" ? "Pay Now" : "Place Order"}</Text>}
           </Pressable>
         </View>
       </KeyboardAvoidingView>
+      {rzpOrder && (
+        <RazorpayCheckout
+          visible={!!rzpOrder}
+          order={rzpOrder}
+          user={rzpUser}
+          onSuccess={onRzpSuccess}
+          onFailure={onRzpFailure}
+          onDismiss={onRzpDismiss}
+        />
+      )}
     </View>
   );
 }

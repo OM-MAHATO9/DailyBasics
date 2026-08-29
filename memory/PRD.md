@@ -49,7 +49,7 @@ Products are grouped into 3 top-level sections with 19 seeded categories:
 - **Delivery Partner**: phone `9888800001` (OTP shown in-app after request)
 
 ## 7. Ready to Extend
-- SMS OTP: swap `OtpProvider.send()` in `server.py` with Twilio/MSG91 client.
-- Payments: `payment_method` and `payment_status` fields already on order; Razorpay/Stripe stub in place.
-- Multi-store / multi-village: `delivery_zones` collection is already the boundary; add `store_id` field to products.
-- Hindi UI localization: strings are already isolated in components, ready for `expo-localization` layer.
+- **SMS OTP**: swap `OtpProvider.send()` in `server.py` with Twilio/MSG91 client.
+- **Razorpay Online Payments**: fully wired for UPI + Cards + Netbanking. Set `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` in `/app/backend/.env` and the "UPI / Card / Netbanking" option in checkout activates automatically. Optional `RAZORPAY_WEBHOOK_SECRET` unlocks async paid-status updates. Flow: place order → backend creates Razorpay order → mobile opens Razorpay Standard Checkout in a WebView modal → user pays via UPI/card/netbanking → signature verified server-side → order marked paid + confirmed. Works in Expo Go (WebView-based, no native build required).
+- **Multi-store / multi-village**: `delivery_zones` collection is already the boundary; add `store_id` field to products.
+- **Hindi UI localization**: strings are already isolated in components, ready for `expo-localization` layer.

@@ -15,8 +15,9 @@ from typing import Any, Optional
 
 import bcrypt
 import jwt
+import razorpay
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
@@ -35,6 +36,12 @@ JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_MINUTES = int(os.environ.get("JWT_EXPIRE_MINUTES", "10080"))
 OTP_EXPIRE_SECONDS = int(os.environ.get("OTP_EXPIRE_SECONDS", "300"))
 DEV_MOCK_OTP = os.environ.get("DEV_MOCK_OTP", "true").lower() == "true"
+
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
+RAZORPAY_ENABLED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET and not RAZORPAY_KEY_ID.endswith("placeholder"))
+rzp_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)) if RAZORPAY_ENABLED else None
 
 client = AsyncIOMotorClient(MONGO_URL, tz_aware=True)
 db = client[DB_NAME]
@@ -523,7 +530,38 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
             {"id": it.product_id},
             {"$inc": {"stock": -it.quantity, "sold_count": it.quantity}},
         )
-    return clean(doc)
+
+    # Razorpay: create RP order for online payments
+    if body.payment_method == "online":
+        if not RAZORPAY_ENABLED:
+            resp = clean(doc)
+            resp["razorpay_enabled"] = False
+            resp["razorpay_message"] = "Online payment not configured yet. Please pay via COD or ask admin to add Razorpay keys."
+            return resp
+        try:
+            amount_paise = int(round(total * 100))
+            rp_order = rzp_client.order.create({
+                "amount": amount_paise,
+                "currency": "INR",
+                "receipt": order_number,
+                "notes": {"order_id": order_id, "user_id": user["id"]},
+                "payment_capture": 1,
+            })
+            await db.orders.update_one(
+                {"id": order_id},
+                {"$set": {"razorpay_order_id": rp_order["id"], "razorpay_amount_paise": amount_paise}},
+            )
+            doc["razorpay_order_id"] = rp_order["id"]
+            doc["razorpay_amount_paise"] = amount_paise
+        except Exception as e:
+            logger.error(f"Razorpay order create failed: {e}")
+            await db.orders.update_one({"id": order_id}, {"$set": {"payment_status": "failed"}})
+            raise HTTPException(502, "Could not initialise online payment")
+
+    resp = clean(doc)
+    resp["razorpay_enabled"] = RAZORPAY_ENABLED
+    resp["razorpay_key_id"] = RAZORPAY_KEY_ID if RAZORPAY_ENABLED else None
+    return resp
 
 
 @app.get("/api/orders")
@@ -621,6 +659,80 @@ async def assign_partner(order_id: str, payload: dict, admin: dict = Depends(req
     )
     if r.matched_count == 0:
         raise HTTPException(404, "Order not found")
+    return {"ok": True}
+
+
+# ------------ PAYMENTS (RAZORPAY) ------------
+class VerifyPayment(BaseModel):
+    order_id: str
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+@app.get("/api/payments/config")
+async def payments_config():
+    return {"razorpay_enabled": RAZORPAY_ENABLED, "razorpay_key_id": RAZORPAY_KEY_ID if RAZORPAY_ENABLED else None}
+
+
+@app.post("/api/payments/razorpay/verify")
+async def verify_razorpay(body: VerifyPayment, user: dict = Depends(require_roles(Role.customer))):
+    if not RAZORPAY_ENABLED:
+        raise HTTPException(400, "Razorpay not configured")
+    order = await db.orders.find_one({"id": body.order_id, "user_id": user["id"]}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if order.get("razorpay_order_id") != body.razorpay_order_id:
+        raise HTTPException(400, "Order mismatch")
+    try:
+        rzp_client.utility.verify_payment_signature({
+            "razorpay_order_id": body.razorpay_order_id,
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "razorpay_signature": body.razorpay_signature,
+        })
+    except Exception:
+        raise HTTPException(400, "Invalid payment signature")
+    await db.orders.update_one(
+        {"id": body.order_id},
+        {"$set": {
+            "razorpay_payment_id": body.razorpay_payment_id,
+            "payment_status": "paid",
+            "status": "confirmed",
+            "payment_verified_at": now(),
+        },
+         "$push": {"status_history": {"status": "confirmed", "at": now().isoformat()}}},
+    )
+    return {"ok": True, "payment_status": "paid"}
+
+
+@app.post("/api/payments/razorpay/webhook", include_in_schema=False)
+async def razorpay_webhook_real(req: Request):
+    if not RAZORPAY_WEBHOOK_SECRET:
+        return {"ok": True, "skipped": True}
+    raw = await req.body()
+    sig = req.headers.get("x-razorpay-signature") or ""
+    import hashlib as _h, hmac as _hm
+    expected = _hm.new(RAZORPAY_WEBHOOK_SECRET.encode(), raw, _h.sha256).hexdigest()
+    if not _hm.compare_digest(expected, sig):
+        raise HTTPException(400, "Invalid webhook signature")
+    import json as _json
+    payload = _json.loads(raw)
+    event = payload.get("event")
+    entity = (payload.get("payload", {}).get("payment", {}) or {}).get("entity", {}) or {}
+    rp_order_id = entity.get("order_id")
+    payment_id = entity.get("id")
+    if not rp_order_id:
+        return {"ok": True}
+    if event in ("payment.captured", "order.paid"):
+        await db.orders.update_one(
+            {"razorpay_order_id": rp_order_id},
+            {"$set": {"payment_status": "paid", "razorpay_payment_id": payment_id, "status": "confirmed"}},
+        )
+    elif event == "payment.failed":
+        await db.orders.update_one(
+            {"razorpay_order_id": rp_order_id},
+            {"$set": {"payment_status": "failed", "payment_failure_reason": entity.get("error_description", "failed")}},
+        )
     return {"ok": True}
 
 
