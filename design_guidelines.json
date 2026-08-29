@@ -1,0 +1,157 @@
+{
+  "app_name": "DailyBasics",
+  "personality": "4 Tactile / Playful LIGHT",
+  "personality_one_liner": "A warm, high-contrast, chunky, and highly accessible interface that feels friendly and intuitive for first-time online buyers in rural India.",
+  "color": {
+    "surface": "#FAFAFA",
+    "onSurface": "#1E1E1E",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#1E1E1E",
+    "surfaceTertiary": "#F0F0F0",
+    "onSurfaceTertiary": "#1E1E1E",
+    "surfaceInverse": "#212121",
+    "onSurfaceInverse": "#FFFFFF",
+    "brand": "#E65100",
+    "brandPrimary": "#E65100",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#FF9800",
+    "onBrandSecondary": "#1E1E1E",
+    "brandTertiary": "#FFF3E0",
+    "onBrandTertiary": "#E65100",
+    "success": "#2E7D32",
+    "onSuccess": "#FFFFFF",
+    "warning": "#F57C00",
+    "onWarning": "#FFFFFF",
+    "error": "#D32F2F",
+    "onError": "#FFFFFF",
+    "info": "#424242",
+    "onInfo": "#FFFFFF",
+    "border": "#E0E0E0",
+    "borderStrong": "#BDBDBD",
+    "divider": "#EEEEEE"
+  },
+  "typography": {
+    "displayFontFamily": "Plus Jakarta Sans",
+    "textFontFamily": "Plus Jakarta Sans",
+    "scale": {
+      "sm": 14,
+      "base": 16,
+      "lg": 18,
+      "xl": 24,
+      "2xl": 28
+    }
+  },
+  "spacing": {
+    "rule": "Generous spacing to accommodate large tap targets (minimum 48x48pt for accessibility). Avoid dense layouts; use clear separation between modules.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 8,
+    "md": 16,
+    "lg": 24,
+    "pill": 999
+  },
+  "shadow_tier": "2",
+  "navigation": "bottom_tabs",
+  "icon_set": "Ionicons",
+  "glassmorphism": {
+    "enabled": "false",
+    "do's": [],
+    "dont's": [
+      "No glassmorphism for this app. We need high contrast, solid surfaces, and maximum readability for the rural audience, falling back to 'solid surfaceSecondary' on elevated elements."
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Customer Home",
+      "purpose": "A highly readable, accessible storefront where users can toggle between Food and Daily Essentials, and browse prominent category cards.",
+      "states": {
+        "loading": "Centered large brand-colored spinner.",
+        "empty": "Illustration of a basket with 'Nothing here yet!' and a 'Refresh' button.",
+        "error": "Readable error text ('Something went wrong') with a large 'Retry' button."
+      },
+      "layout": "Sticky top bar containing Address/Location and a prominent Section Switcher (Food vs Daily Essentials vs Others). Below it, a large Search Bar (supporting Hindi keywords). Next, a bold 'Categories' grid (2-column, chunky cards with real imagery). Product rows follow (large image, clear MRP strike-through, selling price, and a very prominent 'Add to Cart' pill button). A sticky cart summary floating above the bottom tab bar when items are in cart."
+    },
+    {
+      "name": "Customer Cart & Checkout",
+      "purpose": "A friction-free checkout flow summarizing items, clearly showing savings, and prioritizing Cash on Delivery.",
+      "states": {
+        "loading": "Skeleton rows of cart items.",
+        "empty": "Empty basket illustration with text 'Your cart is empty. Let's add something!'",
+        "error": "Error loading cart message with 'Retry'."
+      },
+      "layout": "List of cart items with large (+) and (-) quantity steppers. Below the list, a clear bill details card highlighting 'Total Savings' in success color. A section for 'Apply Coupon'. The bottom has a fixed container with the Total Amount and a massive 'Place Order (COD)' button."
+    },
+    {
+      "name": "Order Tracking",
+      "purpose": "Keeps the user informed with a visual vertical stepper of their order status.",
+      "states": {
+        "loading": "Spinner loading order details.",
+        "empty": "No active orders.",
+        "error": "Failed to fetch order status."
+      },
+      "layout": "Top map/illustration area showing delivery zones, followed by a bold vertical stepper (Order Placed -> Preparing -> Out for Delivery -> Delivered). Below the stepper, delivery partner details (name, call button) and order summary. Large 'Reorder' button at the bottom."
+    },
+    {
+      "name": "Delivery Partner Dashboard",
+      "purpose": "A utility-first interface for partners to toggle online status, view earnings, and manage active deliveries.",
+      "states": {
+        "loading": "Loading deliveries.",
+        "empty": "Illustration showing 'No active deliveries right now.'",
+        "error": "Network error with 'Retry'."
+      },
+      "layout": "Sticky top header with a massive Online/Offline toggle switch. Below it, today's earnings and completed trips in big bold numbers. The main body lists active delivery requests (Pickup/Drop locations, earnings, and a huge 'Accept' swipe/button). Details view includes OTP confirmation."
+    },
+    {
+      "name": "Admin Dashboard",
+      "purpose": "Overview of business metrics, order management, and inventory for store operators.",
+      "states": {
+        "loading": "Spinner loading stats.",
+        "empty": "No recent activity.",
+        "error": "Error fetching dashboard data."
+      },
+      "layout": "Scrollable dashboard with 2-column chunky stat cards (Total Orders, Revenue, Active Partners). Below are quick access rows to 'Manage Inventory', 'Manage Orders', and 'Coupons'. Use prominent dividers and standard list items."
+    }
+  ],
+  "images": {
+    "grocery_basket_bg": {
+      "url": "https://images.unsplash.com/photo-1652892636377-4a5af76973f7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1Mjh8MHwxfHNlYXJjaHwxfHxJbmRpYW4lMjBncm9jZXJ5JTIwZGVsaXZlcnklMjBiYXNrZXQlMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4ODAxMDI1Nnww&ixlib=rb-4.1.0&q=85",
+      "alt": "Indian grocery delivery basket background"
+    },
+    "food_thali_bg": {
+      "url": "https://images.unsplash.com/photo-1589778655375-3e622a9fc91c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDF8MHwxfHNlYXJjaHwxfHxJbmRpYW4lMjByZWFkeSUyMHRvJTIwZWF0JTIwZm9vZCUyMHRoYWxpJTIwYmFja2dyb3VuZHxlbnwwfHx8fDE3ODgwMTAyNTZ8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Indian ready to eat food thali background"
+    },
+    "empty_cart_illustration": {
+      "url": "https://images.unsplash.com/photo-1726443221449-5e3727606f7b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwxfHxFbXB0eSUyMHNob3BwaW5nJTIwYmFza2V0fGVufDB8fHx8MTc4ODAxMDI1Nnww&ixlib=rb-4.1.0&q=85",
+      "alt": "Empty shopping basket"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Follow '4 Tactile / Playful LIGHT' strictly. Use chunky, highly readable UI with strong foreground/background contrast.",
+    "Accessibility is the top priority for this rural target audience: Touch targets must be at least 48x48pt. Font sizes are scaled up (base text is 16pt instead of standard 14pt).",
+    "Absolutely NO blue, indigo, or purple. Use the defined Saffron / Deep Orange (#E65100) brand color.",
+    "Ensure the sticky primary CTAs (like 'Place Order' or 'Add to Cart') are massive, fixed at the bottom of the screen (respecting safe areas), and unmissable.",
+    "Avoid glassmorphism. Use solid elevated surfaces (surfaceSecondary with shadow tier 2) for clarity on lower-end Android devices common in rural areas.",
+    "The Customer Home screen must feature the Section Switcher (Food vs Daily Essentials vs Others) prominently near the top.",
+    "Product cards must clearly show MRP with a strike-through next to the selling price and an unmistakable 'Add' pill button."
+  ]
+}
