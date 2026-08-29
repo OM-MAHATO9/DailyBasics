@@ -225,13 +225,29 @@ async def main():
         await db.delivery_zones.update_one({"name": z["name"]}, {"$set": z}, upsert=True)
     print("✔ Zones ready")
 
-    # 6. Customers
+    # 6. Customers (backfill referral_code + wallet_balance for existing/new)
+    import secrets as _s
+    def _mk_code(name):
+        letters = "".join(c for c in (name or "USER").upper() if c.isalpha())[:3] or "DBM"
+        letters = (letters + "XYZ")[:3]
+        return f"{letters}{_s.randbelow(1000):03d}"
+
     for phone, name in CUSTOMERS:
-        if not await db.users.find_one({"phone": phone, "role": "customer"}):
+        existing = await db.users.find_one({"phone": phone, "role": "customer"})
+        if not existing:
+            code = _mk_code(name)
+            while await db.users.find_one({"referral_code": code}):
+                code = _mk_code(name)
             await db.users.insert_one({
                 "id": str(uuid.uuid4()), "phone": phone, "name": name, "role": "customer",
+                "referral_code": code, "referred_by": None, "wallet_balance": 0.0, "referral_credited": False,
                 "created_at": now(), "is_active": True,
             })
+        elif not existing.get("referral_code"):
+            code = _mk_code(name)
+            while await db.users.find_one({"referral_code": code}):
+                code = _mk_code(name)
+            await db.users.update_one({"id": existing["id"]}, {"$set": {"referral_code": code, "wallet_balance": existing.get("wallet_balance", 0.0), "referral_credited": False}})
     print("✔ Customers ready")
 
     # 7. Delivery Partners

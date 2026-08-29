@@ -28,6 +28,8 @@ export default function Login() {
   const [name, setName] = useState("");
   const [otp, setOtp] = useState("");
   const [mockOtp, setMockOtp] = useState<string | null>(null);
+  const [referralCode, setReferralCode] = useState("");
+  const [referralInfo, setReferralInfo] = useState<{ valid: boolean; referrer_name?: string } | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -60,7 +62,7 @@ export default function Login() {
     if (otp.length !== 6) return setErr("Enter 6-digit OTP");
     setLoading(true);
     try {
-      const r = await api.verifyOtp(phone, otp, role as any, name);
+      const r = await api.verifyOtp(phone, otp, role as any, name, referralCode || undefined);
       await auth.save(r.access_token, r.user);
       if (r.role === "customer") router.replace("/(customer)/home");
       else router.replace("/(delivery)/dashboard");
@@ -68,6 +70,17 @@ export default function Login() {
       setErr(e.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const checkReferral = async (code: string) => {
+    setReferralCode(code.toUpperCase());
+    setReferralInfo(null);
+    if (code.length >= 6) {
+      try {
+        const r = await api.checkReferral(code.toUpperCase());
+        setReferralInfo(r);
+      } catch {}
     }
   };
 
@@ -139,14 +152,37 @@ export default function Login() {
                 <Text style={styles.title}>Enter mobile</Text>
                 <Text style={styles.subtitle}>{role === "customer" ? "We'll send you an OTP" : "Delivery partner login"}</Text>
                 {role === "customer" && (
-                  <TextInput
-                    value={name}
-                    onChangeText={setName}
-                    placeholder="Your name (optional)"
-                    placeholderTextColor={theme.colors.onMuted}
-                    style={styles.input}
-                    testID="name-input"
-                  />
+                  <>
+                    <TextInput
+                      value={name}
+                      onChangeText={setName}
+                      placeholder="Your name (optional)"
+                      placeholderTextColor={theme.colors.onMuted}
+                      style={styles.input}
+                      testID="name-input"
+                    />
+                    <TextInput
+                      value={referralCode}
+                      onChangeText={checkReferral}
+                      placeholder="Referral code (optional) e.g. RAM123"
+                      placeholderTextColor={theme.colors.onMuted}
+                      autoCapitalize="characters"
+                      maxLength={8}
+                      style={styles.input}
+                      testID="referral-input"
+                    />
+                    {referralInfo?.valid && (
+                      <View style={styles.refOk} testID="ref-valid">
+                        <Ionicons name="gift" size={16} color={theme.colors.success} />
+                        <Text style={{ color: theme.colors.success, fontWeight: "700", fontSize: 13 }}>
+                          ✓ Referred by {referralInfo.referrer_name} — you both get ₹50 after your first order!
+                        </Text>
+                      </View>
+                    )}
+                    {referralCode.length >= 6 && referralInfo && !referralInfo.valid && (
+                      <Text style={{ color: theme.colors.error, fontSize: 13, marginTop: 4 }}>Invalid referral code</Text>
+                    )}
+                  </>
                 )}
                 <View style={styles.phoneRow}>
                   <Text style={styles.phonePrefix}>+91</Text>
@@ -303,6 +339,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.brandLight, padding: 12, borderRadius: 12,
   },
   mockText: { color: theme.colors.brand, fontWeight: "700", fontSize: 14 },
+  refOk: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8, padding: 10, backgroundColor: theme.colors.success + "20", borderRadius: 10 },
   backBtn: {
     width: 36, height: 36, borderRadius: 18, backgroundColor: theme.colors.surface3,
     alignItems: "center", justifyContent: "center", marginBottom: 8,

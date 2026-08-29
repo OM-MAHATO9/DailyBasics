@@ -17,7 +17,7 @@ import bcrypt
 import jwt
 import razorpay
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
@@ -43,6 +43,21 @@ RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
 RAZORPAY_ENABLED = bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET and not RAZORPAY_KEY_ID.endswith("placeholder"))
 rzp_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)) if RAZORPAY_ENABLED else None
 
+REFERRAL_REWARD_AMOUNT = float(os.environ.get("REFERRAL_REWARD_AMOUNT", "50"))
+REFERRAL_MIN_ORDER = float(os.environ.get("REFERRAL_MIN_ORDER", "299"))
+
+# Messaging providers (SMS + WhatsApp)
+from messaging import (
+    send_otp_safe,
+    send_wa_safe,
+    tpl_order_confirmed,
+    tpl_out_for_delivery,
+    tpl_delivered,
+    tpl_referral_reward,
+    SMS_PROVIDER,
+    WHATSAPP_PROVIDER,
+)
+
 client = AsyncIOMotorClient(MONGO_URL, tz_aware=True)
 db = client[DB_NAME]
 
@@ -65,6 +80,14 @@ def iso(dt: Optional[datetime]) -> Optional[str]:
 
 
 PHONE_RE = re.compile(r"^\d{10}$")
+
+
+def _make_referral_code(name: str) -> str:
+    """Generate a 6-char human-readable code: 3 letters from name + 3 digits."""
+    letters = "".join(c for c in name.upper() if c.isalpha())[:3] or "DBM"
+    letters = (letters + "XYZ")[:3]
+    digits = f"{secrets.randbelow(1000):03d}"
+    return f"{letters}{digits}"
 
 
 def normalize_phone(phone: str) -> str:
@@ -93,6 +116,7 @@ class VerifyOtp(BaseModel):
     role: Role
     code: str
     name: Optional[str] = None
+    referral_code: Optional[str] = None
 
 
 class AdminLogin(BaseModel):
@@ -128,6 +152,7 @@ class PlaceOrderIn(BaseModel):
     coupon_code: Optional[str] = None
     payment_method: str = "cod"  # cod | upi | online
     instructions: Optional[str] = ""
+    use_wallet: bool = False
 
 
 class UpdateOrderStatus(BaseModel):
@@ -208,6 +233,15 @@ async def request_otp(body: RequestOtp):
     if body.role == Role.admin:
         raise HTTPException(400, "Admins must log in via email/password")
     phone = normalize_phone(body.phone)
+
+    # Simple per-phone throttling: max 3 OTP requests in a rolling 10-minute window
+    ten_min_ago = now() - timedelta(minutes=10)
+    recent = await db.otp_challenges.count_documents({
+        "phone": phone, "role": body.role.value, "last_sent_at": {"$gte": ten_min_ago},
+    })
+    if recent >= 3:
+        raise HTTPException(429, "Too many OTP requests. Please try again after 10 minutes.")
+
     code = f"{secrets.randbelow(1_000_000):06d}"
     digest = hashlib.sha256(code.encode()).hexdigest()
     await db.otp_challenges.update_one(
@@ -217,12 +251,15 @@ async def request_otp(body: RequestOtp):
                 "code_hash": digest,
                 "expires_at": now() + timedelta(seconds=OTP_EXPIRE_SECONDS),
                 "attempts": 0,
-            }
+                "last_sent_at": now(),
+            },
+            "$inc": {"send_count": 1},
         },
         upsert=True,
     )
-    logger.info(f"[MOCK OTP] {phone} ({body.role.value}): {code}")
-    resp = {"message": "OTP sent successfully"}
+    await send_otp_safe(phone, code)
+    resp = {"message": "OTP sent successfully", "provider": SMS_PROVIDER}
+    # DEV_MOCK_OTP surfaces the code in the response for demo/testing only.
     if DEV_MOCK_OTP:
         resp["mock_otp"] = code
     return resp
@@ -250,12 +287,28 @@ async def verify_otp(body: VerifyOtp):
         if body.role == Role.delivery_partner:
             raise HTTPException(403, "Delivery partner not approved. Contact admin.")
         user_id = str(uuid.uuid4())
+        # Auto-generate a unique referral code for new customers
+        referral_code = _make_referral_code(body.name or "USER")
+        while await db.users.find_one({"referral_code": referral_code}):
+            referral_code = _make_referral_code(body.name or "USER")
+
+        # Look up referrer if code was provided (case-insensitive)
+        referred_by = None
+        if body.referral_code:
+            ref_owner = await db.users.find_one({"referral_code": body.referral_code.upper().strip()})
+            if ref_owner and ref_owner["id"] != user_id:
+                referred_by = ref_owner["id"]
+
         await db.users.insert_one(
             {
                 "id": user_id,
                 "phone": phone,
                 "role": body.role.value,
                 "name": body.name or "",
+                "referral_code": referral_code,
+                "referred_by": referred_by,
+                "wallet_balance": 0.0,
+                "referral_credited": False,
                 "created_at": now(),
                 "is_active": True,
             }
@@ -279,6 +332,42 @@ async def admin_login(body: AdminLogin):
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(current_user)):
     return user
+
+
+@app.get("/api/wallet")
+async def wallet(user: dict = Depends(require_roles(Role.customer))):
+    u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "wallet_balance": 1, "referral_code": 1, "referral_credited": 1, "referred_by": 1})
+    txns = await db.wallet_transactions.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).limit(50).to_list(50)
+    for t in txns:
+        if isinstance(t.get("created_at"), datetime):
+            t["created_at"] = t["created_at"].isoformat()
+    return {
+        "balance": round(float((u or {}).get("wallet_balance") or 0), 2),
+        "referral_code": (u or {}).get("referral_code"),
+        "transactions": txns,
+    }
+
+
+@app.get("/api/referral")
+async def referral_info(user: dict = Depends(require_roles(Role.customer))):
+    u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "referral_code": 1, "name": 1})
+    code = (u or {}).get("referral_code")
+    referred_count = await db.users.count_documents({"referred_by": user["id"], "referral_credited": True})
+    return {
+        "referral_code": code,
+        "reward_amount": REFERRAL_REWARD_AMOUNT,
+        "min_order": REFERRAL_MIN_ORDER,
+        "referred_count": referred_count,
+        "share_message": f"Hey! Try DailyBasics — fresh groceries delivered in 30 min. Use my code {code} on signup and get ₹{int(REFERRAL_REWARD_AMOUNT)} off your first order over ₹{int(REFERRAL_MIN_ORDER)}!",
+    }
+
+
+@app.get("/api/referral/check/{code}")
+async def check_referral_code(code: str):
+    owner = await db.users.find_one({"referral_code": code.upper().strip()}, {"_id": 0, "name": 1, "referral_code": 1})
+    if not owner:
+        return {"valid": False}
+    return {"valid": True, "referrer_name": owner.get("name") or "a DailyBasics customer"}
 
 
 # ------------ CATEGORIES ------------
@@ -505,6 +594,17 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
             coupon_doc = c
 
     total = round(subtotal + delivery_charge - coupon_discount, 2)
+
+    # Apply wallet balance (customer opt-in)
+    wallet_applied = 0.0
+    if body.use_wallet:
+        u = await db.users.find_one({"id": user["id"]}, {"_id": 0, "wallet_balance": 1})
+        bal = float((u or {}).get("wallet_balance") or 0)
+        # Never let wallet cover delivery-only orders — leave at least ₹1 payable
+        max_apply = max(0.0, total - 1)
+        wallet_applied = round(min(bal, max_apply), 2)
+        total = round(total - wallet_applied, 2)
+
     order_id = str(uuid.uuid4())
     order_number = f"DB{now().strftime('%y%m%d')}{secrets.randbelow(10000):04d}"
     otp_code = f"{secrets.randbelow(10000):04d}"
@@ -521,6 +621,7 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
         "delivery_charge": delivery_charge,
         "coupon_code": coupon_applied,
         "coupon_discount": coupon_discount,
+        "wallet_applied": wallet_applied,
         "total": total,
         "savings": round(savings, 2),
         "payment_method": body.payment_method,
@@ -535,6 +636,15 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
         "created_at": now(),
     }
     await db.orders.insert_one(doc)
+
+    # Deduct wallet balance
+    if wallet_applied > 0:
+        await db.users.update_one({"id": user["id"]}, {"$inc": {"wallet_balance": -wallet_applied}})
+        await db.wallet_transactions.insert_one({
+            "user_id": user["id"], "amount": -wallet_applied, "type": "spent",
+            "order_id": order_id, "note": f"Applied to order {order_number}",
+            "created_at": now(),
+        })
 
     # Record coupon redemption (once_per_user enforcement)
     if coupon_applied and coupon_doc and coupon_doc.get("once_per_user"):
@@ -585,6 +695,10 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
     resp = clean(doc)
     resp["razorpay_enabled"] = RAZORPAY_ENABLED
     resp["razorpay_key_id"] = RAZORPAY_KEY_ID if RAZORPAY_ENABLED else None
+    # WhatsApp confirmation (fire-and-forget, non-blocking, safe on failure)
+    if body.payment_method == "cod":
+        import asyncio as _a
+        _a.create_task(send_wa_safe(user.get("phone") or "", tpl_order_confirmed(user.get("name") or "", order_number, total, zone["eta_minutes"])))
     return resp
 
 
@@ -673,10 +787,61 @@ async def update_status(order_id: str, body: UpdateOrderStatus, user: dict = Dep
                 {"id": it["product_id"]},
                 {"$inc": {"stock": it["quantity"], "sold_count": -it["quantity"]}},
             )
+        # Refund wallet-applied amount to buyer
+        wa = float(o.get("wallet_applied") or 0)
+        if wa > 0:
+            await db.users.update_one({"id": o["user_id"]}, {"$inc": {"wallet_balance": wa}})
+            await db.wallet_transactions.insert_one({
+                "user_id": o["user_id"], "amount": wa, "type": "refund",
+                "order_id": order_id, "note": f"Refund for cancelled order {o.get('order_number')}",
+                "created_at": now(),
+            })
+
+    # WhatsApp notifications (fire-and-forget)
+    import asyncio as _a
+    customer_phone = o.get("address", {}).get("phone") or o.get("user_phone") or ""
+    if new_status == "out_for_delivery":
+        _a.create_task(send_wa_safe(customer_phone, tpl_out_for_delivery(
+            o["order_number"], o.get("delivery_partner_name") or "Partner",
+            o.get("delivery_partner_phone") or "", o.get("delivery_otp") or "",
+        )))
+    elif new_status == "delivered":
+        _a.create_task(send_wa_safe(customer_phone, tpl_delivered(o["order_number"])))
+        # Referral rewards on first successful delivery
+        await _maybe_credit_referral(o["user_id"])
+
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if isinstance(updated.get("created_at"), datetime):
         updated["created_at"] = updated["created_at"].isoformat()
-    return updated
+    return _strip_delivery_otp(updated, user["role"])
+
+
+async def _maybe_credit_referral(user_id: str):
+    u = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not u or u.get("referral_credited") or not u.get("referred_by"):
+        return
+    # Must be first non-cancelled delivered order
+    delivered_count = await db.orders.count_documents({"user_id": user_id, "status": "delivered"})
+    if delivered_count != 1:
+        return
+    # Must meet min-order threshold on this delivered order
+    delivered_order = await db.orders.find_one({"user_id": user_id, "status": "delivered"}, {"_id": 0})
+    if not delivered_order or float(delivered_order.get("total", 0)) + float(delivered_order.get("wallet_applied") or 0) < REFERRAL_MIN_ORDER:
+        return
+    referrer_id = u["referred_by"]
+    amount = REFERRAL_REWARD_AMOUNT
+    # Credit both users atomically
+    await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}, "$set": {"referral_credited": True}})
+    await db.users.update_one({"id": referrer_id}, {"$inc": {"wallet_balance": amount}})
+    await db.wallet_transactions.insert_many([
+        {"user_id": user_id, "amount": amount, "type": "referral_bonus", "note": "Signup referral bonus", "created_at": now()},
+        {"user_id": referrer_id, "amount": amount, "type": "referral_reward", "note": f"Reward for referring {u.get('name') or u.get('phone')}", "created_at": now()},
+    ])
+    # Notify referrer via WhatsApp
+    referrer = await db.users.find_one({"id": referrer_id}, {"_id": 0})
+    if referrer:
+        import asyncio as _a
+        _a.create_task(send_wa_safe(referrer.get("phone") or "", tpl_referral_reward(referrer.get("name") or "", int(amount), u.get("name") or u.get("phone") or "your friend")))
 
 
 @app.post("/api/orders/{order_id}/assign")
@@ -884,6 +1049,7 @@ async def root():
 async def startup():
     await db.users.create_index([("phone", 1), ("role", 1)], sparse=True)
     await db.users.create_index([("email", 1), ("role", 1)], sparse=True)
+    await db.users.create_index([("referral_code", 1)], sparse=True, unique=True)
     await db.otp_challenges.create_index("expires_at", expireAfterSeconds=0)
     await db.products.create_index([("name", 1)])
     await db.products.create_index([("category_id", 1)])

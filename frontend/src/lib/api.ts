@@ -33,14 +33,14 @@ async function req<T = any>(path: string, opts: RequestInit = {}, auth = false):
 export const api = {
   // Auth
   requestOtp: (phone: string, role: Exclude<Role, "admin">) =>
-    req<{ message: string; mock_otp?: string }>("/api/auth/otp/request", {
+    req<{ message: string; mock_otp?: string; provider?: string }>("/api/auth/otp/request", {
       method: "POST",
       body: JSON.stringify({ phone, role }),
     }),
-  verifyOtp: (phone: string, code: string, role: Exclude<Role, "admin">, name?: string) =>
+  verifyOtp: (phone: string, code: string, role: Exclude<Role, "admin">, name?: string, referral_code?: string) =>
     req<{ access_token: string; role: Role; user: User }>("/api/auth/otp/verify", {
       method: "POST",
-      body: JSON.stringify({ phone, code, role, name }),
+      body: JSON.stringify({ phone, code, role, name, referral_code }),
     }),
   adminLogin: (email: string, password: string) =>
     req<{ access_token: string; role: Role; user: User }>("/api/auth/admin/login", {
@@ -90,6 +90,11 @@ export const api = {
   togglePartner: (id: string, is_active: boolean) =>
     req<any>(`/api/admin/partners/${id}`, { method: "PATCH", body: JSON.stringify({ is_active }) }, true),
   adminCustomers: () => req<any[]>("/api/admin/customers", {}, true),
+
+  // Wallet & Referral
+  wallet: () => req<{ balance: number; referral_code: string; transactions: any[] }>("/api/wallet", {}, true),
+  referral: () => req<{ referral_code: string; reward_amount: number; min_order: number; referred_count: number; share_message: string }>("/api/referral", {}, true),
+  checkReferral: (code: string) => req<{ valid: boolean; referrer_name?: string }>(`/api/referral/check/${code}`),
 };
 
 export const auth = {

@@ -127,6 +127,7 @@ export default function OrderTracking() {
           <Row k="Subtotal" v={formatINR(order.subtotal)} />
           <Row k="Delivery" v={formatINR(order.delivery_charge)} />
           {order.coupon_discount > 0 && <Row k={`Coupon (${order.coupon_code})`} v={`- ${formatINR(order.coupon_discount)}`} vColor={theme.colors.success} />}
+          {order.wallet_applied > 0 && <Row k="Wallet Used" v={`- ${formatINR(order.wallet_applied)}`} vColor={theme.colors.success} />}
           <View style={styles.div} />
           <Row k="Total" v={formatINR(order.total)} bold />
           <Row k="Payment" v={order.payment_method.toUpperCase()} />

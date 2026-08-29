@@ -27,6 +27,8 @@ export default function Checkout() {
   const [payConfig, setPayConfig] = useState<{ razorpay_enabled: boolean; razorpay_key_id: string | null }>({ razorpay_enabled: false, razorpay_key_id: null });
   const [rzpOrder, setRzpOrder] = useState<any>(null);
   const [rzpUser, setRzpUser] = useState<any>({});
+  const [walletBal, setWalletBal] = useState(0);
+  const [useWallet, setUseWallet] = useState(false);
 
   useEffect(() => {
     api.addresses().then((a) => {
@@ -36,6 +38,7 @@ export default function Checkout() {
     });
     fetchPaymentConfig().then(setPayConfig).catch(() => {});
     auth.getUser().then((u) => setRzpUser(u || {}));
+    api.wallet().then((w) => setWalletBal(w.balance || 0)).catch(() => {});
   }, []);
 
   const checkPin = async (pin: string) => {
@@ -68,7 +71,9 @@ export default function Checkout() {
 
   const deliveryCharge = deliveryInfo ? (couponInfo?.free_delivery ? 0 : deliveryInfo.delivery_charge) : 0;
   const couponDiscount = couponInfo?.discount || 0;
-  const total = subtotal + deliveryCharge - couponDiscount;
+  const subTotalBeforeWallet = subtotal + deliveryCharge - couponDiscount;
+  const walletApplied = useWallet ? Math.max(0, Math.min(walletBal, subTotalBeforeWallet - 1)) : 0;
+  const total = Math.max(0, subTotalBeforeWallet - walletApplied);
 
   const placeOrder = async () => {
     if (!addrId) return setErr("Select address");
@@ -80,6 +85,7 @@ export default function Checkout() {
         items: items.map((i) => ({ product_id: i.product_id, quantity: i.quantity })),
         coupon_code: couponInfo ? couponInfo.code : null,
         payment_method: payMethod,
+        use_wallet: useWallet,
       });
       if (payMethod === "online") {
         if (!order.razorpay_enabled) {
@@ -191,6 +197,20 @@ export default function Checkout() {
             </View>
           )}
 
+          {walletBal > 0 && (
+            <>
+              <Text style={styles.sec}>DailyBasics Wallet</Text>
+              <Pressable style={[styles.payOpt, useWallet && styles.payActive]} onPress={() => setUseWallet(!useWallet)} testID="use-wallet-toggle">
+                <Ionicons name="wallet" size={22} color={theme.colors.brand} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.payTitle}>Use Wallet Balance</Text>
+                  <Text style={styles.paySub}>You have {formatINR(walletBal)} available</Text>
+                </View>
+                <View style={[styles.radio, useWallet && { backgroundColor: theme.colors.brand }]}>{useWallet && <Ionicons name="checkmark" size={14} color="#fff" />}</View>
+              </Pressable>
+            </>
+          )}
+
           <Text style={styles.sec}>Payment Method</Text>
           <Pressable style={[styles.payOpt, payMethod === "cod" && styles.payActive]} onPress={() => setPayMethod("cod")} testID="pay-cod">
             <Ionicons name="cash" size={22} color={theme.colors.brand} />
@@ -218,6 +238,7 @@ export default function Checkout() {
             <Row k="Item Total" v={formatINR(subtotal)} />
             <Row k="Delivery Charge" v={deliveryCharge === 0 && couponInfo?.free_delivery ? "FREE" : formatINR(deliveryCharge)} />
             {couponDiscount > 0 && <Row k={`Coupon (${couponInfo.code})`} v={`- ${formatINR(couponDiscount)}`} vColor={theme.colors.success} />}
+            {walletApplied > 0 && <Row k="Wallet Applied" v={`- ${formatINR(walletApplied)}`} vColor={theme.colors.success} />}
             <View style={{ height: 1, backgroundColor: theme.colors.divider, marginVertical: 8 }} />
             <Row k="Total" v={formatINR(total)} bold />
           </View>
