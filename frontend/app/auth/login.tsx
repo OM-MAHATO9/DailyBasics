@@ -28,8 +28,8 @@ export default function Login() {
   const [name, setName] = useState("");
   const [otp, setOtp] = useState("");
   const [mockOtp, setMockOtp] = useState<string | null>(null);
-  const [email, setEmail] = useState("admin@dailybasics.in");
-  const [password, setPassword] = useState("Admin@123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 

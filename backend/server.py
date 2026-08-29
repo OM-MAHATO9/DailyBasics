@@ -119,7 +119,7 @@ class AddressIn(BaseModel):
 
 class CartItem(BaseModel):
     product_id: str
-    quantity: int
+    quantity: int = Field(gt=0, le=100)
 
 
 class PlaceOrderIn(BaseModel):
@@ -418,6 +418,10 @@ async def apply_coupon(payload: dict, user: dict = Depends(require_roles(Role.cu
         raise HTTPException(400, "Invalid coupon code")
     if subtotal < c.get("min_order", 0):
         raise HTTPException(400, f"Minimum order ₹{c['min_order']} required")
+    if c.get("once_per_user"):
+        already = await db.coupon_redemptions.find_one({"user_id": user["id"], "code": code})
+        if already:
+            raise HTTPException(400, "This coupon can only be used once")
     discount = 0.0
     if c["type"] == "flat":
         discount = float(c["value"])
@@ -454,6 +458,8 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
     subtotal = 0.0
     savings = 0.0
     for it in body.items:
+        if it.quantity <= 0 or it.quantity > 100:
+            raise HTTPException(400, "Invalid item quantity")
         p = products.get(it.product_id)
         if not p or not p.get("is_active", True):
             raise HTTPException(400, f"Product unavailable")
@@ -479,9 +485,14 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
     delivery_charge = float(zone["delivery_charge"])
     coupon_discount = 0.0
     coupon_applied = None
+    coupon_doc = None
     if body.coupon_code:
         c = await db.coupons.find_one({"code": body.coupon_code.upper(), "is_active": True}, {"_id": 0})
         if c and subtotal >= c.get("min_order", 0):
+            if c.get("once_per_user"):
+                already = await db.coupon_redemptions.find_one({"user_id": user["id"], "code": c["code"]})
+                if already:
+                    raise HTTPException(400, "This coupon can only be used once")
             if c["type"] == "flat":
                 coupon_discount = float(c["value"])
             elif c["type"] == "percent":
@@ -491,6 +502,7 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
             elif c["type"] == "free_delivery":
                 delivery_charge = 0.0
             coupon_applied = c["code"]
+            coupon_doc = c
 
     total = round(subtotal + delivery_charge - coupon_discount, 2)
     order_id = str(uuid.uuid4())
@@ -523,6 +535,18 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
         "created_at": now(),
     }
     await db.orders.insert_one(doc)
+
+    # Record coupon redemption (once_per_user enforcement)
+    if coupon_applied and coupon_doc and coupon_doc.get("once_per_user"):
+        try:
+            await db.coupon_redemptions.insert_one({
+                "user_id": user["id"],
+                "code": coupon_applied,
+                "order_id": order_id,
+                "created_at": now(),
+            })
+        except Exception as e:
+            logger.warning(f"coupon redemption insert failed: {e}")
 
     # Reduce stock
     for it in body.items:
@@ -564,6 +588,15 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
     return resp
 
 
+def _strip_delivery_otp(order: dict, user_role: str) -> dict:
+    """Delivery OTP is proof-of-delivery. Only the customer sees it; delivery
+    partners must ask the customer to share it verbally, and admin dashboard
+    doesn't need it either."""
+    if user_role != Role.customer.value and "delivery_otp" in order:
+        order = {k: v for k, v in order.items() if k != "delivery_otp"}
+    return order
+
+
 @app.get("/api/orders")
 async def list_orders(user: dict = Depends(current_user), status_filter: Optional[str] = Query(None, alias="status")):
     q: dict = {}
@@ -574,10 +607,12 @@ async def list_orders(user: dict = Depends(current_user), status_filter: Optiona
     if status_filter:
         q["status"] = status_filter
     items = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
+    out = []
     for it in items:
         if isinstance(it.get("created_at"), datetime):
             it["created_at"] = it["created_at"].isoformat()
-    return items
+        out.append(_strip_delivery_otp(it, user["role"]))
+    return out
 
 
 @app.get("/api/orders/{order_id}")
@@ -591,7 +626,7 @@ async def get_order(order_id: str, user: dict = Depends(current_user)):
         raise HTTPException(403, "Forbidden")
     if isinstance(o.get("created_at"), datetime):
         o["created_at"] = o["created_at"].isoformat()
-    return o
+    return _strip_delivery_otp(o, user["role"])
 
 
 @app.patch("/api/orders/{order_id}/status")
@@ -793,10 +828,12 @@ async def admin_orders(admin: dict = Depends(require_roles(Role.admin)), status_
     if status_filter:
         q["status"] = status_filter
     items = await db.orders.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    out = []
     for it in items:
         if isinstance(it.get("created_at"), datetime):
             it["created_at"] = it["created_at"].isoformat()
-    return items
+        out.append(_strip_delivery_otp(it, "admin"))
+    return out
 
 
 @app.get("/api/admin/partners")
@@ -852,6 +889,13 @@ async def startup():
     await db.products.create_index([("category_id", 1)])
     await db.orders.create_index([("user_id", 1)])
     await db.orders.create_index([("delivery_partner_id", 1)])
+    await db.coupon_redemptions.create_index([("user_id", 1), ("code", 1)], unique=True)
+
+    # Startup security warnings
+    if DEV_MOCK_OTP:
+        logger.warning("SECURITY: DEV_MOCK_OTP=true — OTP codes are returned in API responses. DISABLE before production!")
+    if os.environ.get("ADMIN_PASSWORD") in (None, "", "Admin@123", "ChangeMe123!"):
+        logger.warning("SECURITY: Admin password is a default/weak value. Change ADMIN_PASSWORD in .env before production!")
 
 
 @app.on_event("shutdown")

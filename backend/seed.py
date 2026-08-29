@@ -126,9 +126,9 @@ def make_products(cat_map):
 
 
 COUPONS = [
-    {"code": "WELCOME50", "type": "flat", "value": 50, "min_order": 299, "message": "₹50 off your first order", "is_active": True},
-    {"code": "SAVE20", "type": "percent", "value": 20, "max_discount": 100, "min_order": 199, "message": "20% off (max ₹100)", "is_active": True},
-    {"code": "FREEDEL", "type": "free_delivery", "value": 0, "min_order": 149, "message": "Free delivery", "is_active": True},
+    {"code": "WELCOME50", "type": "flat", "value": 50, "min_order": 299, "message": "₹50 off your first order", "is_active": True, "once_per_user": True},
+    {"code": "SAVE20", "type": "percent", "value": 20, "max_discount": 100, "min_order": 199, "message": "20% off (max ₹100)", "is_active": True, "once_per_user": False},
+    {"code": "FREEDEL", "type": "free_delivery", "value": 0, "min_order": 149, "message": "Free delivery", "is_active": True, "once_per_user": False},
 ]
 
 

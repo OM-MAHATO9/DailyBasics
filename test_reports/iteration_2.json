@@ -1,0 +1,36 @@
+{
+  "summary": "Security-audit fix verification for DailyBasics (SEC-001 UI, SEC-003, SEC-004, SEC-005). Focused scope only — no full regression. Backend: 13/13 pytest cases pass in /app/backend/tests/test_security_fixes.py. FIX-1 SEC-003 (quantity guard): POST /api/orders with quantity=-5, 0, 101 all rejected with 422 (Pydantic Field(gt=0, le=100)); quantity=1 succeeds — order placed. FIX-2 SEC-004 (delivery_otp leak): _strip_delivery_otp scrubs the field for any non-customer role. Verified delivery partner GET /api/orders/{id} and GET /api/orders both omit delivery_otp; admin GET /api/admin/orders also omits it; customer GET /api/orders/{id} still returns delivery_otp (needed to share). Wrong OTP on PATCH /orders/{id}/status returns 400; customer-supplied real OTP succeeds → status=delivered, payment_status=paid. FIX-3 SEC-005 (coupon reuse): fresh customer A places COD order ≥ ₹299 with WELCOME50 — 200; second /coupons/apply as A → 400 'This coupon can only be used once'; second place_order as A with WELCOME50 → 400; different fresh customer B → /coupons/apply returns 200 discount=50 (per-user restriction confirmed). FIX-4 SEC-001 UI (login pre-fill removed): admin-email and admin-password inputs load empty on the Admin tab; correct creds still authenticate → navigates to /dashboard. Empty submit returns 422 (backend). FIX-5 Sanity: fresh 999911xxxx customer completed OTP login → home → added 2 products → cart → checkout → new address (pincode 110001, 'Deliverable in 30 min') → COD place order → landed on /order/{uuid} tracking screen (DB2608295950) with vertical status stepper (Order Placed → In progress). Mock-OTP disclosure (SEC-002) NOT flagged as instructed — intentional demo behaviour.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Console warns: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Still present after this iteration — pre-existing carry-over from iteration_1 action items."},
+      {"component": "props.pointerEvents", "issue": "Console warns: 'props.pointerEvents is deprecated. Use style.pointerEvents' — still present, pre-existing carry-over."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_security_fixes.py",
+    "/app/test_reports/pytest/security_fixes.xml"
+  ],
+  "action_items": [
+    "None required for the 5 security findings — all fixes verified working.",
+    "(Carry-over, non-security) Still address deprecation warnings shadow* → boxShadow and props.pointerEvents → style.pointerEvents to silence console spam."
+  ],
+  "critical_code_review_comments": [
+    "server.py:461-462 has an explicit 'if it.quantity <= 0 or it.quantity > 100' guard inside place_order, which is redundant given Pydantic CartItem.quantity = Field(gt=0, le=100) already returns 422. Harmless defence-in-depth but note that when the request bypasses model validation (e.g., raw dict) Pydantic still catches it. Keeping the guard is fine.",
+    "server.py:_strip_delivery_otp uses a role check (user_role != Role.customer.value). It correctly hides delivery_otp from admin AND delivery_partner, but the field is only useful to the placing customer — an ownership check would be stricter (a customer viewing someone else's order would still be a 403 anyway via list filter, so acceptable).",
+    "Coupon redemption is inserted AFTER db.orders.insert_one but wrapped in try/except that only logs; if the insert into coupon_redemptions fails (e.g., duplicate-key race), the order is already saved with the discount but reuse guard state may be inconsistent. Add a unique index (already present at line 892) means a genuine duplicate race would be caught, but the order still went through with 50 off. Consider making redemption insertion part of the pre-check-and-record pattern (insert redemption first, roll back if order fails) if you want strict at-most-once semantics under high concurrency.",
+    "Coupon 'once_per_user' check runs both inside apply_coupon and place_order — good; without the second check a user could bypass the apply-endpoint and pass coupon_code directly to /orders."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_security_fixes.py (new — 13 pytest cases across TestSEC003_Quantity/TestSEC004_OtpLeak/TestSEC005_Coupon/TestSEC001_AdminAuth)"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% (SEC-001 UI + sanity happy-path)"},
+  "seed_data_creation": "Test users created via mock OTP (fresh random phones 99997xxxxx, 99996xxxxx, 99995xxxxx, 99991xxxxx) with 'TEST_' / 'TEST SEC' / 'TEST H-9' prefixed addresses (pincode 110001). A handful of small COD orders were placed as part of verifying the fixes (2 for SEC-003 sanity, 1 for SEC-004, 1 for SEC-005 A). All data is prefixed TEST for easy purge.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Security regression suite lives at /app/backend/tests/test_security_fixes.py — safe to re-run any time; uses random phones so no data collisions. Existing full-regression suite at /app/backend/tests/backend_test.py is untouched. Deprecation warnings for shadow* and pointerEvents remain pre-existing frontend action items from iteration_1 (not security-related).",
+  "rca_of_issue": "N/A — all 5 audit findings that were in scope are properly blocked by the applied fixes. SEC-002 mock_otp disclosure is intentional and out of scope per the review request."
+}
