@@ -2,13 +2,23 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/src/lib/api";
 import { useCart } from "@/src/lib/cart";
 import { theme, formatINR } from "@/src/lib/theme";
 import ProductCard from "@/src/components/ProductCard";
 import CartBar from "@/src/components/CartBar";
+import { CARD_H_W, CAT_CARD_W, isSmall, SCREEN_WIDTH } from "@/src/utils/responsive";
 
 const SECTIONS = [
   { key: "food", label: "Food", icon: "restaurant" as const },
@@ -58,30 +68,44 @@ export default function Home() {
     setRefresh(false);
   };
 
+  // Bottom padding = tab bar (49) + safe area + cart bar (when visible)
+  const contentPaddingBottom = 49 + insets.bottom + (count > 0 ? 72 : 16);
+  // Banner image size: responsive
+  const bannerImgSize = Math.min(Math.round(SCREEN_WIDTH * 0.22), 96);
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.surface }}>
       {/* Sticky Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <View style={styles.locRow}>
           <Ionicons name="location" size={18} color={theme.colors.brand} />
-          <View style={{ flex: 1, marginLeft: 6 }}>
+          <View style={{ flex: 1, marginLeft: 6, minWidth: 0 }}>
             <Text style={styles.locLabel}>Delivering to</Text>
             <Text style={styles.locVal} numberOfLines={1}>Village Core • 30 min</Text>
           </View>
-          <Pressable onPress={() => router.push("/(customer)/profile")} testID="profile-quick" style={styles.profileBtn}>
+          <Pressable
+            onPress={() => router.push("/(customer)/profile")}
+            testID="profile-quick"
+            style={styles.profileBtn}
+            hitSlop={8}
+          >
             <Ionicons name="person-circle" size={30} color={theme.colors.brand} />
           </Pressable>
         </View>
 
-        <Pressable style={styles.searchBar} onPress={() => router.push("/(customer)/search")} testID="search-open">
-          <Ionicons name="search" size={20} color={theme.colors.onMuted} />
-          <Text style={styles.searchPh}>Search "atta", "milk", दूध...</Text>
+        <Pressable
+          style={styles.searchBar}
+          onPress={() => router.push("/(customer)/search")}
+          testID="search-open"
+        >
+          <Ionicons name="search" size={18} color={theme.colors.onMuted} />
+          <Text style={styles.searchPh} numberOfLines={1}>Search "atta", "milk", दूध...</Text>
         </Pressable>
 
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 16, gap: 8, paddingBottom: 8 }}
+          contentContainerStyle={styles.chipRow}
         >
           {SECTIONS.map((s) => {
             const active = section === s.key;
@@ -92,7 +116,7 @@ export default function Home() {
                 style={[styles.chip, active && styles.chipActive]}
                 testID={`section-${s.key}`}
               >
-                <Ionicons name={s.icon} size={16} color={active ? "#fff" : theme.colors.on} />
+                <Ionicons name={s.icon} size={15} color={active ? "#fff" : theme.colors.on} />
                 <Text style={[styles.chipText, active && { color: "#fff" }]}>{s.label}</Text>
               </Pressable>
             );
@@ -101,8 +125,10 @@ export default function Home() {
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: (count > 0 ? 90 : 24) + insets.bottom }}
-        refreshControl={<RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={theme.colors.brand} />}
+        contentContainerStyle={{ paddingBottom: contentPaddingBottom }}
+        refreshControl={
+          <RefreshControl refreshing={refresh} onRefresh={onRefresh} tintColor={theme.colors.brand} />
+        }
       >
         {loading ? (
           <View style={{ padding: 60, alignItems: "center" }}>
@@ -112,28 +138,38 @@ export default function Home() {
           <>
             {/* Promo Banner */}
             <View style={styles.banner}>
-              <View style={{ flex: 1 }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={styles.bannerTitle}>Fresh & Fast</Text>
-                <Text style={styles.bannerSub}>Delivery in 30 mins</Text>
+                <Text style={styles.bannerSub} numberOfLines={1}>Delivery in 30 mins</Text>
                 <View style={styles.bannerBadge}>
                   <Text style={styles.bannerBadgeText}>Use WELCOME50</Text>
                 </View>
               </View>
-              <Image source={{ uri: "https://images.unsplash.com/photo-1610348725531-843dff563e2c?w=400" }} style={styles.bannerImg} />
+              <Image
+                source={{ uri: "https://images.unsplash.com/photo-1610348725531-843dff563e2c?w=400" }}
+                style={[styles.bannerImg, { width: bannerImgSize, height: bannerImgSize }]}
+              />
             </View>
 
             {/* Categories */}
             {categories.length > 0 && (
               <Section title="Shop by Category">
+                {/* Use a flat row-wrap grid with exact per-card width */}
                 <View style={styles.catGrid}>
                   {categories.map((c) => (
                     <Pressable
                       key={c.id}
-                      style={styles.catCard}
-                      onPress={() => router.push({ pathname: "/(customer)/categories", params: { cat: c.id } })}
+                      style={[styles.catCard, { width: CAT_CARD_W }]}
+                      onPress={() =>
+                        router.push({ pathname: "/(customer)/categories", params: { cat: c.id } })
+                      }
                       testID={`cat-${c.id}`}
                     >
-                      <Image source={{ uri: c.image }} style={styles.catImg} contentFit="cover" />
+                      <Image
+                        source={{ uri: c.image }}
+                        style={[styles.catImg, { width: CAT_CARD_W - 12, height: CAT_CARD_W - 12 }]}
+                        contentFit="cover"
+                      />
                       <Text style={styles.catText} numberOfLines={2}>{c.name}</Text>
                     </Pressable>
                   ))}
@@ -148,9 +184,9 @@ export default function Home() {
                   data={featured}
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
+                  contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
                   keyExtractor={(i) => i.id}
-                  renderItem={({ item }) => <ProductCard product={item} width={160} />}
+                  renderItem={({ item }) => <ProductCard product={item} width={CARD_H_W} />}
                 />
               </Section>
             )}
@@ -162,19 +198,19 @@ export default function Home() {
                   data={bestsellers}
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={{ paddingHorizontal: 16, gap: 12 }}
+                  contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
                   keyExtractor={(i) => i.id}
-                  renderItem={({ item }) => <ProductCard product={item} width={160} />}
+                  renderItem={({ item }) => <ProductCard product={item} width={CARD_H_W} />}
                 />
               </Section>
             )}
 
-            {/* All */}
+            {/* All — 2-col grid, flex-based */}
             {all.length > 0 && (
               <Section title="Recommended for You">
                 <View style={styles.grid}>
                   {all.map((p) => (
-                    <View key={p.id} style={{ width: "48%", marginBottom: 12 }}>
+                    <View key={p.id} style={styles.gridItem}>
                       <ProductCard product={p} />
                     </View>
                   ))}
@@ -199,37 +235,109 @@ function Section({ title, children }: any) {
   );
 }
 
+const GRID_GAP = 8;
+const GRID_H_PAD = 16;
+const GRID_ITEM_W = Math.floor((SCREEN_WIDTH - GRID_H_PAD * 2 - GRID_GAP) / 2);
+
 const styles = StyleSheet.create({
-  header: { backgroundColor: theme.colors.surface2, paddingBottom: 4, borderBottomWidth: 1, borderBottomColor: theme.colors.divider },
-  locRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 8 },
-  locLabel: { fontSize: 12, color: theme.colors.onMuted },
-  locVal: { fontSize: 15, fontWeight: "700", color: theme.colors.on },
-  profileBtn: { padding: 4 },
-  searchBar: {
-    marginHorizontal: 16, marginTop: 4, marginBottom: 10, backgroundColor: theme.colors.surface3,
-    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, flexDirection: "row", alignItems: "center", gap: 10,
+  header: {
+    backgroundColor: theme.colors.surface2,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.divider,
   },
-  searchPh: { color: theme.colors.onMuted, fontSize: 15 },
+  locRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+  },
+  locLabel: { fontSize: 11, color: theme.colors.onMuted },
+  locVal: { fontSize: 14, fontWeight: "700", color: theme.colors.on },
+  profileBtn: { padding: 4, flexShrink: 0 },
+  searchBar: {
+    marginHorizontal: 16,
+    marginTop: 4,
+    marginBottom: 8,
+    backgroundColor: theme.colors.surface3,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  searchPh: { color: theme.colors.onMuted, fontSize: 14, flex: 1 },
+  chipRow: { paddingHorizontal: 16, gap: 8, paddingBottom: 8 },
   chip: {
-    flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 999, backgroundColor: theme.colors.surface3, flexShrink: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surface3,
+    flexShrink: 0,
   },
   chipActive: { backgroundColor: theme.colors.brand },
-  chipText: { fontSize: 14, fontWeight: "700", color: theme.colors.on },
+  chipText: { fontSize: 13, fontWeight: "700", color: theme.colors.on },
   banner: {
-    marginHorizontal: 16, marginTop: 16, borderRadius: 20, overflow: "hidden",
-    backgroundColor: theme.colors.brandLight, padding: 16, flexDirection: "row", alignItems: "center",
+    marginHorizontal: 16,
+    marginTop: 14,
+    borderRadius: 18,
+    overflow: "hidden",
+    backgroundColor: theme.colors.brandLight,
+    padding: 14,
+    flexDirection: "row",
+    alignItems: "center",
     ...theme.shadow.card,
   },
-  bannerTitle: { fontSize: 22, fontWeight: "800", color: theme.colors.brand },
-  bannerSub: { fontSize: 14, color: theme.colors.on, marginTop: 4 },
-  bannerBadge: { backgroundColor: theme.colors.brand, alignSelf: "flex-start", paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, marginTop: 10 },
-  bannerBadgeText: { color: "#fff", fontSize: 12, fontWeight: "700" },
-  bannerImg: { width: 90, height: 90, borderRadius: 16, marginLeft: 12 },
-  sectionTitle: { fontSize: 18, fontWeight: "800", color: theme.colors.on, marginHorizontal: 16, marginBottom: 12 },
-  catGrid: { flexDirection: "row", flexWrap: "wrap", paddingHorizontal: 12, gap: 4 },
-  catCard: { width: "23%", alignItems: "center", padding: 6 },
-  catImg: { width: 70, height: 70, borderRadius: 16, backgroundColor: theme.colors.surface3 },
-  catText: { fontSize: 12, fontWeight: "600", color: theme.colors.on, marginTop: 6, textAlign: "center" },
-  grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", paddingHorizontal: 16 },
+  bannerTitle: { fontSize: 20, fontWeight: "800", color: theme.colors.brand },
+  bannerSub: { fontSize: 13, color: theme.colors.on, marginTop: 3 },
+  bannerBadge: {
+    backgroundColor: theme.colors.brand,
+    alignSelf: "flex-start",
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    marginTop: 8,
+  },
+  bannerBadgeText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  bannerImg: { borderRadius: 14, marginLeft: 10, flexShrink: 0 },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: theme.colors.on,
+    marginHorizontal: 16,
+    marginBottom: 10,
+  },
+  catGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: 12,
+    gap: 4,
+  },
+  catCard: {
+    alignItems: "center",
+    padding: 6,
+  },
+  catImg: {
+    borderRadius: 14,
+    backgroundColor: theme.colors.surface3,
+  },
+  catText: {
+    fontSize: isSmall ? 10 : 11,
+    fontWeight: "600",
+    color: theme.colors.on,
+    marginTop: 5,
+    textAlign: "center",
+    lineHeight: 14,
+  },
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: GRID_H_PAD,
+    gap: GRID_GAP,
+  },
+  gridItem: { width: GRID_ITEM_W },
 });

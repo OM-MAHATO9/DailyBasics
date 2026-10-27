@@ -8,6 +8,7 @@ import { theme } from "@/src/lib/theme";
 import ProductCard from "@/src/components/ProductCard";
 import CartBar from "@/src/components/CartBar";
 import { useCart } from "@/src/lib/cart";
+import { SIDEBAR_W } from "@/src/utils/responsive";
 
 export default function Categories() {
   const params = useLocalSearchParams<{ cat?: string }>();
@@ -33,13 +34,20 @@ export default function Categories() {
     api.products({ category_id: selected, limit: 100 }).then((p) => { setProducts(p); setLoading(false); });
   }, [selected]);
 
+  const cartBarExtra = count > 0 ? 64 : 0;
+
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.surface }}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.title}>All Categories</Text>
       </View>
       <View style={{ flex: 1, flexDirection: "row" }}>
-        <ScrollView style={styles.side} contentContainerStyle={{ paddingBottom: 100 + insets.bottom }}>
+        {/* Sidebar — width adapts to screen via SIDEBAR_W */}
+        <ScrollView
+          style={[styles.side, { width: SIDEBAR_W }]}
+          contentContainerStyle={{ paddingBottom: 16 + insets.bottom }}
+          showsVerticalScrollIndicator={false}
+        >
           {cats.map((c) => {
             const active = c.id === selected;
             return (
@@ -50,11 +58,18 @@ export default function Categories() {
                 testID={`cat-side-${c.id}`}
               >
                 <View style={[styles.sideBar, active && styles.sideBarActive]} />
-                <Text style={[styles.sideText, active && styles.sideTextActive]} numberOfLines={2}>{c.name}</Text>
+                <Text
+                  style={[styles.sideText, active && styles.sideTextActive]}
+                  numberOfLines={2}
+                >
+                  {c.name}
+                </Text>
               </Pressable>
             );
           })}
         </ScrollView>
+
+        {/* Product grid */}
         <View style={{ flex: 1 }}>
           {loading ? (
             <ActivityIndicator size="large" color={theme.colors.brand} style={{ marginTop: 40 }} />
@@ -63,9 +78,16 @@ export default function Categories() {
               data={products}
               keyExtractor={(i) => i.id}
               numColumns={2}
-              columnWrapperStyle={{ gap: 8, paddingHorizontal: 8 }}
-              contentContainerStyle={{ paddingVertical: 8, paddingBottom: 100 + insets.bottom, gap: 8 }}
-              renderItem={({ item }) => <View style={{ flex: 1 }}><ProductCard product={item} /></View>}
+              columnWrapperStyle={styles.colWrap}
+              contentContainerStyle={[
+                styles.listContent,
+                { paddingBottom: 72 + cartBarExtra + insets.bottom },
+              ]}
+              renderItem={({ item }) => (
+                <View style={styles.cardWrap}>
+                  <ProductCard product={item} />
+                </View>
+              )}
               ListEmptyComponent={<Text style={styles.empty}>No products yet</Text>}
             />
           )}
@@ -77,14 +99,46 @@ export default function Categories() {
 }
 
 const styles = StyleSheet.create({
-  header: { paddingHorizontal: 16, paddingBottom: 12, backgroundColor: theme.colors.surface2, borderBottomWidth: 1, borderBottomColor: theme.colors.divider },
-  title: { fontSize: 22, fontWeight: "800", color: theme.colors.on },
-  side: { width: 110, backgroundColor: theme.colors.surface3 },
-  sideItem: { paddingVertical: 14, paddingHorizontal: 8, flexDirection: "row", alignItems: "center" },
-  sideItemActive: { backgroundColor: theme.colors.surface },
-  sideBar: { width: 4, height: 32, borderRadius: 2, backgroundColor: "transparent", marginRight: 6 },
+  header: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    backgroundColor: theme.colors.surface2,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.divider,
+  },
+  title: { fontSize: 20, fontWeight: "800", color: theme.colors.on },
+  side: { backgroundColor: theme.colors.surface3 },
+  sideItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  sideItemActive: { backgroundColor: theme.colors.surface2 },
+  sideBar: {
+    width: 3,
+    height: 28,
+    borderRadius: 2,
+    backgroundColor: "transparent",
+    marginRight: 6,
+    flexShrink: 0,
+  },
   sideBarActive: { backgroundColor: theme.colors.brand },
-  sideText: { fontSize: 12, color: theme.colors.on, fontWeight: "600", flex: 1 },
+  sideText: {
+    fontSize: 11,
+    color: theme.colors.on,
+    fontWeight: "600",
+    flex: 1,
+    lineHeight: 15,
+  },
   sideTextActive: { color: theme.colors.brand, fontWeight: "800" },
-  empty: { textAlign: "center", color: theme.colors.onMuted, marginTop: 40, fontSize: 16 },
+  colWrap: { gap: 8, paddingHorizontal: 8 },
+  listContent: { paddingVertical: 8, gap: 8 },
+  cardWrap: { flex: 1, minWidth: 0 },
+  empty: {
+    textAlign: "center",
+    color: theme.colors.onMuted,
+    marginTop: 40,
+    fontSize: 15,
+  },
 });

@@ -154,10 +154,7 @@ PARTNERS = [
 ]
 
 
-async def main():
-    client = AsyncIOMotorClient(MONGO_URL)
-    db = client[DB_NAME]
-
+async def seed_db(db):
     # 1. Admin
     existing = await db.users.find_one({"email": ADMIN_EMAIL, "role": "admin"})
     if not existing:
@@ -170,9 +167,9 @@ async def main():
             "created_at": now(),
             "is_active": True,
         })
-        print("✔ Admin created")
+        print("[OK] Admin created")
     else:
-        print("• Admin exists")
+        print("[*] Admin exists")
 
     # 2. Categories
     cat_map = {}
@@ -184,7 +181,7 @@ async def main():
             cid = str(uuid.uuid4())
             await db.categories.insert_one({**c, "id": cid, "is_active": True, "created_at": now()})
             cat_map[c["name"]] = cid
-    print(f"✔ Categories: {len(cat_map)}")
+    print(f"[OK] Categories: {len(cat_map)}")
 
     # 3. Products
     products = make_products(cat_map)
@@ -213,17 +210,17 @@ async def main():
             "created_at": now(),
         })
         added += 1
-    print(f"✔ Products added: {added} (total {len(products)})")
+    print(f"[OK] Products added: {added} (total {len(products)})")
 
     # 4. Coupons
     for c in COUPONS:
         await db.coupons.update_one({"code": c["code"]}, {"$set": c}, upsert=True)
-    print("✔ Coupons ready")
+    print("[OK] Coupons ready")
 
     # 5. Zones
     for z in ZONES:
         await db.delivery_zones.update_one({"name": z["name"]}, {"$set": z}, upsert=True)
-    print("✔ Zones ready")
+    print("[OK] Zones ready")
 
     # 6. Customers (backfill referral_code + wallet_balance for existing/new)
     import secrets as _s
@@ -248,7 +245,7 @@ async def main():
             while await db.users.find_one({"referral_code": code}):
                 code = _mk_code(name)
             await db.users.update_one({"id": existing["id"]}, {"$set": {"referral_code": code, "wallet_balance": existing.get("wallet_balance", 0.0), "referral_credited": False}})
-    print("✔ Customers ready")
+    print("[OK] Customers ready")
 
     # 7. Delivery Partners
     for phone, name in PARTNERS:
@@ -257,10 +254,15 @@ async def main():
                 "id": str(uuid.uuid4()), "phone": phone, "name": name, "role": "delivery_partner",
                 "created_at": now(), "is_active": True,
             })
-    print("✔ Delivery partners ready")
+    print("[OK] Delivery partners ready")
+    print("[OK] Seeding complete")
 
+
+async def main():
+    client = AsyncIOMotorClient(MONGO_URL)
+    db = client[DB_NAME]
+    await seed_db(db)
     client.close()
-    print("✅ Seeding complete")
 
 
 if __name__ == "__main__":

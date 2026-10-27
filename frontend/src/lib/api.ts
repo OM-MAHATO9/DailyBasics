@@ -1,6 +1,6 @@
 import { storage } from "./storage";
 
-const API = process.env.EXPO_PUBLIC_BACKEND_URL;
+const API = process.env.EXPO_PUBLIC_BACKEND_URL || "http://localhost:8000";
 const TOKEN_KEY = "db_token";
 const USER_KEY = "db_user";
 

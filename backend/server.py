@@ -58,14 +58,27 @@ from messaging import (
     WHATSAPP_PROVIDER,
 )
 
-client = AsyncIOMotorClient(MONGO_URL, tz_aware=True)
+from seed import seed_db
+
+try:
+    if MONGO_URL.startswith("mongomock://"):
+        from mongomock_motor import AsyncMongoMockClient
+        client = AsyncMongoMockClient()
+        logger.info("Using in-memory mongomock_motor database client")
+    else:
+        client = AsyncIOMotorClient(MONGO_URL, tz_aware=True, serverSelectionTimeoutMS=1000)
+except Exception as e:
+    logger.warning(f"Could not initialize MongoDB client at {MONGO_URL}: {e}. Falling back to in-memory mongomock_motor.")
+    from mongomock_motor import AsyncMongoMockClient
+    client = AsyncMongoMockClient()
+
 db = client[DB_NAME]
 
 app = FastAPI(title="DailyBasics API")
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=False,
-    allow_origins=["*"],
+    allow_credentials=True,
+    allow_origin_regex=".*",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -73,6 +86,14 @@ app.add_middleware(
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def iso(dt: Optional[datetime]) -> Optional[str]:
@@ -271,7 +292,7 @@ async def verify_otp(body: VerifyOtp):
         raise HTTPException(400, "Admins must log in via email/password")
     phone = normalize_phone(body.phone)
     c = await db.otp_challenges.find_one({"phone": phone, "role": body.role.value})
-    if not c or c["expires_at"] <= now() or c.get("attempts", 0) >= 5:
+    if not c or ensure_utc(c.get("expires_at")) <= now() or c.get("attempts", 0) >= 5:
         raise HTTPException(401, "OTP expired or too many attempts. Please request again.")
     await db.otp_challenges.update_one({"_id": c["_id"]}, {"$inc": {"attempts": 1}})
     if not hmac.compare_digest(c["code_hash"], hashlib.sha256(body.code.encode()).hexdigest()):
@@ -1047,6 +1068,15 @@ async def root():
 # ------------ Startup ------------
 @app.on_event("startup")
 async def startup():
+    global client, db
+    try:
+        await client.admin.command('ping')
+    except Exception:
+        logger.warning(f"MongoDB connection ping failed at {MONGO_URL}. Switching to in-memory database.")
+        from mongomock_motor import AsyncMongoMockClient
+        client = AsyncMongoMockClient()
+        db = client[DB_NAME]
+
     await db.users.create_index([("phone", 1), ("role", 1)], sparse=True)
     await db.users.create_index([("email", 1), ("role", 1)], sparse=True)
     await db.users.create_index([("referral_code", 1)], sparse=True, unique=True)
@@ -1056,6 +1086,10 @@ async def startup():
     await db.orders.create_index([("user_id", 1)])
     await db.orders.create_index([("delivery_partner_id", 1)])
     await db.coupon_redemptions.create_index([("user_id", 1), ("code", 1)], unique=True)
+
+    if await db.products.count_documents({}) == 0:
+        logger.info("Database is empty — auto-seeding demo data...")
+        await seed_db(db)
 
     # Startup security warnings
     if DEV_MOCK_OTP:

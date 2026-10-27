@@ -97,17 +97,18 @@ const styles = StyleSheet.create({
   header: { backgroundColor: theme.colors.surface2, borderBottomWidth: 1, borderBottomColor: theme.colors.divider },
   searchBox: {
     flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 10,
-    backgroundColor: theme.colors.surface3, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10,
+    backgroundColor: theme.colors.surface3, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10,
+    minWidth: 0,
   },
-  input: { flex: 1, fontSize: 16, color: theme.colors.on },
+  input: { flex: 1, fontSize: 15, color: theme.colors.on, minWidth: 0 },
   sortChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: theme.colors.surface3, flexShrink: 0 },
   sortText: { fontSize: 13, fontWeight: "700", color: theme.colors.on },
   h: { fontSize: 18, fontWeight: "800", color: theme.colors.on, marginBottom: 12 },
   chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: theme.colors.brandLight,
-    paddingHorizontal: 14, paddingVertical: 10, borderRadius: 999,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
   },
-  chipText: { color: theme.colors.brand, fontWeight: "700", fontSize: 14 },
+  chipText: { color: theme.colors.brand, fontWeight: "700", fontSize: 13 },
   empty: { textAlign: "center", color: theme.colors.onMuted, marginTop: 40, fontSize: 15 },
 });
