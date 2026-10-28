@@ -13,7 +13,7 @@ The app ships **three role-based interfaces in a single Expo bundle**:
 - **Backend**: FastAPI (single `server.py`), Motor (async MongoDB), JWT (PyJWT) + bcrypt.
 - **DB**: MongoDB (`dailybasics`).
 - **State**: Local storage (AsyncStorage + SecureStore abstraction) for token + cart persistence.
-- **Theme**: Saffron/Deep Orange `#E65100` primary, chunky cards, 48pt+ tap targets.
+- **Theme**: Deep Forest Green `#00452F` primary, chunky cards, 48pt+ tap targets.
 
 ## 3. Sections & Categories
 Products are grouped into 3 top-level sections with 19 seeded categories:

@@ -36,7 +36,7 @@ export default function RazorpayCheckout({ visible, order, user, onSuccess, onFa
       email: ${JSON.stringify(user.email || "")},
       contact: ${JSON.stringify(user.phone || "")}
     },
-    theme: { color: "#E65100" },
+    theme: { color: "#00452F" },
     modal: {
       ondismiss: function() {
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: "dismiss" }));

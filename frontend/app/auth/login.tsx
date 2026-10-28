@@ -100,7 +100,7 @@ export default function Login() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.brand }}>
-      <LinearGradient colors={[theme.colors.brand, "#BF360C"]} style={StyleSheet.absoluteFill} />
+      <LinearGradient colors={[theme.colors.brand, "#002A1C"]} style={StyleSheet.absoluteFill} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
