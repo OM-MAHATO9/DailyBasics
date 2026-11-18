@@ -5,7 +5,9 @@ import { useCallback, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { api } from "@/src/lib/api";
+import { api, auth } from "@/src/lib/api";
+import { retryRazorpay, verifyRazorpay } from "@/src/lib/payments";
+import RazorpayCheckout from "@/src/components/RazorpayCheckout";
 import { theme, formatINR } from "@/src/lib/theme";
 
 const STEPS = [
@@ -18,12 +20,16 @@ const STEPS = [
 ];
 
 export default function OrderTracking() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, payMsg } = useLocalSearchParams<{ id: string; payMsg?: string }>();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  const [payNote, setPayNote] = useState<string>(payMsg || "");
+  const [paying, setPaying] = useState(false);
+  const [rzpOrder, setRzpOrder] = useState<any>(null);
+  const [rzpUser, setRzpUser] = useState<any>({});
 
   const load = useCallback(async () => {
     try { setOrder(await api.order(id as string)); }
@@ -37,10 +43,30 @@ export default function OrderTracking() {
     try { await api.updateOrderStatus(id as string, { status: "cancelled" }); await load(); } catch {} finally { setCancelling(false); }
   };
 
+  const payNow = async () => {
+    setPaying(true); setPayNote("");
+    try {
+      const [o, u] = await Promise.all([retryRazorpay(id as string), auth.getUser()]);
+      setRzpUser(u || {});
+      setRzpOrder(o);
+    } catch (e: any) { setPayNote(e.message); }
+    finally { setPaying(false); }
+  };
+  const onRzpSuccess = async (resp: any) => {
+    setRzpOrder(null);
+    try { await verifyRazorpay(id as string, resp); setPayNote(""); }
+    catch (e: any) { setPayNote(`We couldn't confirm your payment yet (${e.message}). If money was deducted, it will update shortly.`); }
+    load();
+  };
+  const onRzpFailure = (r: any) => { setRzpOrder(null); setPayNote(`Payment failed: ${r?.description || "please try again"}.`); };
+  const onRzpDismiss = () => { setRzpOrder(null); setPayNote("Payment cancelled."); };
+
   if (loading || !order) return <View style={{ flex: 1, backgroundColor: theme.colors.surface, justifyContent: "center" }}><ActivityIndicator size="large" color={theme.colors.brand} /></View>;
 
   const currentIdx = STEPS.findIndex((s) => s.key === order.status);
   const cancelled = order.status === "cancelled";
+  const awaitingPayment = !cancelled && order.payment_method === "online" && order.payment_status !== "paid";
+  const PAY_LABEL: Record<string, string> = { paid: "Paid", pending: "Not paid yet", failed: "Payment failed", refunded: "Refunded", refund_failed: "Refund pending" };
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.surface }}>
@@ -57,6 +83,19 @@ export default function OrderTracking() {
             <Text style={styles.etaTime}>{cancelled ? "This order was cancelled" : `${order.eta_minutes} minutes`}</Text>
           </View>
         </View>
+
+        {awaitingPayment && (
+          <View style={styles.payCard} testID="pay-pending-card">
+            <Ionicons name="card" size={24} color={theme.colors.brand} />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={styles.payTitle}>Payment pending</Text>
+              <Text style={styles.paySub}>{payNote || `Pay ${formatINR(order.total)} to confirm your order.`}</Text>
+            </View>
+            <Pressable style={styles.payBtn} onPress={payNow} disabled={paying} testID="pay-now-btn">
+              {paying ? <ActivityIndicator color="#fff" /> : <Text style={styles.payBtnText}>Pay Now</Text>}
+            </Pressable>
+          </View>
+        )}
 
         {!cancelled && (
           <View style={styles.stepper}>
@@ -130,7 +169,7 @@ export default function OrderTracking() {
           {order.wallet_applied > 0 && <Row k="Wallet Used" v={`- ${formatINR(order.wallet_applied)}`} vColor={theme.colors.success} />}
           <View style={styles.div} />
           <Row k="Total" v={formatINR(order.total)} bold />
-          <Row k="Payment" v={order.payment_method.toUpperCase()} />
+          <Row k="Payment" v={order.payment_method === "online" ? `ONLINE • ${PAY_LABEL[order.payment_status] || order.payment_status}` : order.payment_method.toUpperCase()} />
         </View>
 
         {!cancelled && ["placed", "confirmed"].includes(order.status) && (
@@ -139,6 +178,16 @@ export default function OrderTracking() {
           </Pressable>
         )}
       </ScrollView>
+      {rzpOrder && (
+        <RazorpayCheckout
+          visible={!!rzpOrder}
+          order={rzpOrder}
+          user={rzpUser}
+          onSuccess={onRzpSuccess}
+          onFailure={onRzpFailure}
+          onDismiss={onRzpDismiss}
+        />
+      )}
     </View>
   );
 }
@@ -180,6 +229,11 @@ const styles = StyleSheet.create({
   itemQty: { fontSize: 12, color: theme.colors.onMuted, marginTop: 2 },
   itemTotal: { fontSize: 14, fontWeight: "800", color: theme.colors.on },
   div: { height: 1, backgroundColor: theme.colors.divider, marginVertical: 8 },
+  payCard: { flexDirection: "row", alignItems: "center", padding: 14, backgroundColor: theme.colors.brandLight, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: theme.colors.brand },
+  payTitle: { fontSize: 15, fontWeight: "800", color: theme.colors.on },
+  paySub: { fontSize: 12, color: theme.colors.onMuted, marginTop: 2 },
+  payBtn: { backgroundColor: theme.colors.brand, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, marginLeft: 8, minWidth: 90, alignItems: "center" },
+  payBtnText: { color: "#fff", fontWeight: "800", fontSize: 14 },
   cancelBtn: { padding: 14, borderRadius: 12, borderWidth: 1.5, borderColor: theme.colors.error, alignItems: "center", backgroundColor: theme.colors.surface2 },
   cancelText: { color: theme.colors.error, fontWeight: "800", fontSize: 15 },
 });
