@@ -102,30 +102,27 @@ export default function Checkout() {
     } catch (e: any) { setErr(e.message); setPlacing(false); }
   };
 
+  // After any checkout outcome the order exists, so empty the cart and show
+  // the order page. An unpaid order there has a "Pay Now" button to retry.
+  const goToOrder = (orderId: string, msg?: string) => {
+    setRzpOrder(null);
+    clear();
+    router.replace({ pathname: "/(customer)/order/[id]", params: msg ? { id: orderId, payMsg: msg } : { id: orderId } });
+  };
   const onRzpSuccess = async (resp: any) => {
+    const orderId = rzpOrder.id;
     try {
-      await verifyRazorpay(rzpOrder.id, resp);
-      const orderId = rzpOrder.id;
-      setRzpOrder(null);
-      clear();
-      router.replace({ pathname: "/(customer)/order/[id]", params: { id: orderId } });
+      await verifyRazorpay(orderId, resp);
+      goToOrder(orderId);
     } catch (e: any) {
-      setErr(`Payment verify failed: ${e.message}. Order kept — you can retry from Orders.`);
-      setRzpOrder(null);
+      goToOrder(orderId, `We couldn't confirm your payment yet (${e.message}). If money was deducted, it will update shortly.`);
     }
   };
   const onRzpFailure = (r: any) => {
-    setErr(`Payment failed: ${r?.description || "Please try again"}. Order kept.`);
-    setRzpOrder(null);
+    if (rzpOrder) goToOrder(rzpOrder.id, `Payment failed: ${r?.description || "please try again"}.`);
   };
   const onRzpDismiss = () => {
-    setErr("Payment cancelled. You can retry from your Orders.");
-    if (rzpOrder) {
-      const orderId = rzpOrder.id;
-      setRzpOrder(null);
-      clear();
-      router.replace({ pathname: "/(customer)/order/[id]", params: { id: orderId } });
-    }
+    if (rzpOrder) goToOrder(rzpOrder.id, "Payment cancelled.");
   };
 
   return (

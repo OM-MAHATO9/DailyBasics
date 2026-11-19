@@ -626,6 +626,9 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
         wallet_applied = round(min(bal, max_apply), 2)
         total = round(total - wallet_applied, 2)
 
+    if body.payment_method == "online" and int(round(total * 100)) < RZP_MIN_AMOUNT_PAISE:
+        raise HTTPException(400, "Minimum online payment is ₹1. Please choose Cash on Delivery.")
+
     order_id = str(uuid.uuid4())
     order_number = f"DB{now().strftime('%y%m%d')}{secrets.randbelow(10000):04d}"
     otp_code = f"{secrets.randbelow(10000):04d}"
@@ -694,24 +697,12 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
             resp["razorpay_message"] = "Online payment not configured yet. Please pay via COD or ask admin to add Razorpay keys."
             return resp
         try:
-            amount_paise = int(round(total * 100))
-            rp_order = rzp_client.order.create({
-                "amount": amount_paise,
-                "currency": "INR",
-                "receipt": order_number,
-                "notes": {"order_id": order_id, "user_id": user["id"]},
-                "payment_capture": 1,
-            })
-            await db.orders.update_one(
-                {"id": order_id},
-                {"$set": {"razorpay_order_id": rp_order["id"], "razorpay_amount_paise": amount_paise}},
-            )
-            doc["razorpay_order_id"] = rp_order["id"]
-            doc["razorpay_amount_paise"] = amount_paise
+            rp = await _create_rzp_order(doc)
+            doc.update(rp)
         except Exception as e:
             logger.error(f"Razorpay order create failed: {e}")
             await db.orders.update_one({"id": order_id}, {"$set": {"payment_status": "failed"}})
-            raise HTTPException(502, "Could not initialise online payment")
+            raise _rzp_http_error(e)
 
     resp = clean(doc)
     resp["razorpay_enabled"] = RAZORPAY_ENABLED
@@ -808,6 +799,9 @@ async def update_status(order_id: str, body: UpdateOrderStatus, user: dict = Dep
                 {"id": it["product_id"]},
                 {"$inc": {"stock": it["quantity"], "sold_count": -it["quantity"]}},
             )
+        # Refund online payment back to the customer's card/UPI
+        if o.get("payment_method") == "online" and o.get("payment_status") == "paid":
+            await _refund_online(o)
         # Refund wallet-applied amount to buyer
         wa = float(o.get("wallet_applied") or 0)
         if wa > 0:
@@ -884,11 +878,97 @@ async def assign_partner(order_id: str, payload: dict, admin: dict = Depends(req
 
 
 # ------------ PAYMENTS (RAZORPAY) ------------
+RZP_MIN_AMOUNT_PAISE = 100  # Razorpay's minimum order amount (₹1)
+
+
+def _rzp_http_error(e: Exception) -> HTTPException:
+    """Map a Razorpay API error to an HTTP error for the app."""
+    if isinstance(e, HTTPException):
+        return e
+    if "authentication" in str(e).lower():
+        # Wrong RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET on the server
+        return HTTPException(401, "Payment gateway authentication failed. Please contact support.")
+    return HTTPException(500, "Could not initialise online payment. Please try again.")
+
+
+def _valid_rzp_signature(rzp_order_id: str, payment_id: str, signature: str) -> bool:
+    """Razorpay checkout signature: HMAC-SHA256(order_id + "|" + payment_id, KEY_SECRET)."""
+    expected = hmac.new(
+        RAZORPAY_KEY_SECRET.encode(),
+        f"{rzp_order_id}|{payment_id}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+async def _create_rzp_order(order: dict) -> dict:
+    """Create a Razorpay order for one of our orders and save its id on it."""
+    amount_paise = int(round(float(order["total"]) * 100))
+    if amount_paise < RZP_MIN_AMOUNT_PAISE:
+        raise HTTPException(400, "Minimum online payment is ₹1. Please choose Cash on Delivery.")
+    rp_order = rzp_client.order.create({
+        "amount": amount_paise,
+        "currency": "INR",
+        "receipt": order["order_number"],
+        "notes": {"order_id": order["id"], "user_id": order["user_id"]},
+        "payment_capture": 1,
+    })
+    fields = {"razorpay_order_id": rp_order["id"], "razorpay_amount_paise": amount_paise}
+    await db.orders.update_one({"id": order["id"]}, {"$set": fields})
+    return fields
+
+
+async def _refund_online(order: dict) -> None:
+    """Refund the full online-paid amount for a cancelled order via Razorpay."""
+    payment_id = order.get("razorpay_payment_id")
+    if not (RAZORPAY_ENABLED and payment_id):
+        return
+    try:
+        refund = rzp_client.payment.refund(payment_id, {"amount": int(order.get("razorpay_amount_paise") or round(float(order["total"]) * 100))})
+        await db.orders.update_one({"id": order["id"]}, {"$set": {
+            "payment_status": "refunded", "razorpay_refund_id": refund.get("id"), "refunded_at": now(),
+        }})
+    except Exception as e:
+        logger.error(f"Razorpay refund failed for order {order.get('order_number')}: {e}")
+        await db.orders.update_one({"id": order["id"]}, {"$set": {"payment_status": "refund_failed"}})
+
+
+async def _mark_order_paid(order: dict, payment_id: Optional[str]) -> None:
+    """Mark an order paid exactly once. Called by both the checkout verify
+    call and the webhook, whichever arrives first; the second is a no-op.
+    Only moves the order to 'confirmed' if it hasn't progressed further."""
+    r = await db.orders.update_one(
+        {"id": order["id"], "payment_status": {"$ne": "paid"}},
+        {"$set": {
+            "razorpay_payment_id": payment_id,
+            "payment_status": "paid",
+            "payment_verified_at": now(),
+        }},
+    )
+    if r.modified_count == 0:
+        return
+    if order.get("status") == "cancelled":
+        # Payment completed after the order was cancelled: give it back.
+        await _refund_online({**order, "razorpay_payment_id": payment_id})
+        return
+    await db.orders.update_one(
+        {"id": order["id"], "status": "placed"},
+        {"$set": {"status": "confirmed"},
+         "$push": {"status_history": {"status": "confirmed", "at": now().isoformat()}}},
+    )
+    import asyncio as _a
+    _a.create_task(send_wa_safe(
+        order.get("user_phone") or "",
+        tpl_order_confirmed(order.get("user_name") or "", order["order_number"], order["total"], order.get("eta_minutes") or 30),
+    ))
+
+
 class VerifyPayment(BaseModel):
-    order_id: str
-    razorpay_order_id: str
-    razorpay_payment_id: str
-    razorpay_signature: str
+    # Optional here so a missing field returns a clear 400 (not FastAPI's 422)
+    order_id: Optional[str] = None
+    razorpay_order_id: Optional[str] = None
+    razorpay_payment_id: Optional[str] = None
+    razorpay_signature: Optional[str] = None
 
 
 @app.get("/api/payments/config")
@@ -900,30 +980,59 @@ async def payments_config():
 async def verify_razorpay(body: VerifyPayment, user: dict = Depends(require_roles(Role.customer))):
     if not RAZORPAY_ENABLED:
         raise HTTPException(400, "Razorpay not configured")
+    missing = [f for f in ("order_id", "razorpay_order_id", "razorpay_payment_id", "razorpay_signature") if not getattr(body, f)]
+    if missing:
+        raise HTTPException(400, f"Missing payment fields: {', '.join(missing)}")
     order = await db.orders.find_one({"id": body.order_id, "user_id": user["id"]}, {"_id": 0})
     if not order:
         raise HTTPException(404, "Order not found")
     if order.get("razorpay_order_id") != body.razorpay_order_id:
         raise HTTPException(400, "Order mismatch")
-    try:
-        rzp_client.utility.verify_payment_signature({
-            "razorpay_order_id": body.razorpay_order_id,
-            "razorpay_payment_id": body.razorpay_payment_id,
-            "razorpay_signature": body.razorpay_signature,
-        })
-    except Exception:
+    if not _valid_rzp_signature(body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature):
+        # Do NOT mark as paid
         raise HTTPException(400, "Invalid payment signature")
-    await db.orders.update_one(
-        {"id": body.order_id},
-        {"$set": {
-            "razorpay_payment_id": body.razorpay_payment_id,
-            "payment_status": "paid",
-            "status": "confirmed",
-            "payment_verified_at": now(),
-        },
-         "$push": {"status_history": {"status": "confirmed", "at": now().isoformat()}}},
-    )
+    await _mark_order_paid(order, body.razorpay_payment_id)
     return {"ok": True, "payment_status": "paid"}
+
+
+@app.post("/api/payments/razorpay/retry/{order_id}")
+async def retry_razorpay(order_id: str, user: dict = Depends(require_roles(Role.customer))):
+    """Start a fresh Razorpay checkout for an unpaid online order (after a
+    failed, cancelled or abandoned payment)."""
+    if not RAZORPAY_ENABLED:
+        raise HTTPException(400, "Online payment is not configured")
+    order = await db.orders.find_one({"id": order_id, "user_id": user["id"]}, {"_id": 0})
+    if not order:
+        raise HTTPException(404, "Order not found")
+    if order.get("payment_method") != "online":
+        raise HTTPException(400, "This order is not an online-payment order")
+    if order.get("payment_status") == "paid":
+        raise HTTPException(400, "This order is already paid")
+    if order.get("status") == "cancelled":
+        raise HTTPException(400, "This order was cancelled")
+    # Guard against double payment: if the previous attempt was actually
+    # paid (e.g. the app lost connection before verifying), record it now.
+    if order.get("razorpay_order_id"):
+        try:
+            prev = rzp_client.order.payments(order["razorpay_order_id"])
+            captured = next((p for p in prev.get("items", []) if p.get("status") == "captured"), None)
+        except Exception as e:
+            logger.warning(f"Could not check earlier Razorpay payments: {e}")
+            captured = None
+        if captured:
+            await _mark_order_paid(order, captured["id"])
+            raise HTTPException(409, "This order is already paid. Please refresh.")
+    try:
+        rp = await _create_rzp_order(order)
+    except Exception as e:
+        logger.error(f"Razorpay retry order create failed: {e}")
+        raise _rzp_http_error(e)
+    await db.orders.update_one({"id": order_id}, {"$set": {"payment_status": "pending"}})
+    order.update(rp)
+    resp = clean(order)
+    resp["razorpay_enabled"] = True
+    resp["razorpay_key_id"] = RAZORPAY_KEY_ID
+    return resp
 
 
 @app.post("/api/payments/razorpay/webhook", include_in_schema=False)
@@ -944,14 +1053,17 @@ async def razorpay_webhook_real(req: Request):
     payment_id = entity.get("id")
     if not rp_order_id:
         return {"ok": True}
+    order = await db.orders.find_one({"razorpay_order_id": rp_order_id}, {"_id": 0})
+    if not order and (entity.get("notes") or {}).get("order_id"):
+        # Payment made on an earlier checkout attempt of a retried order
+        order = await db.orders.find_one({"id": entity["notes"]["order_id"]}, {"_id": 0})
+    if not order:
+        return {"ok": True}
     if event in ("payment.captured", "order.paid"):
+        await _mark_order_paid(order, payment_id)
+    elif event == "payment.failed" and order.get("payment_status") != "paid":
         await db.orders.update_one(
-            {"razorpay_order_id": rp_order_id},
-            {"$set": {"payment_status": "paid", "razorpay_payment_id": payment_id, "status": "confirmed"}},
-        )
-    elif event == "payment.failed":
-        await db.orders.update_one(
-            {"razorpay_order_id": rp_order_id},
+            {"id": order["id"]},
             {"$set": {"payment_status": "failed", "payment_failure_reason": entity.get("error_description", "failed")}},
         )
     return {"ok": True}
