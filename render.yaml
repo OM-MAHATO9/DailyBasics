@@ -32,3 +32,22 @@ services:
         sync: false
       - key: RAZORPAY_WEBHOOK_SECRET
         sync: false
+
+  # Customer app (Expo web build), served as a static site.
+  - type: web
+    name: dailybasics-app
+    runtime: static
+    rootDir: frontend
+    branch: Dev-AK
+    buildCommand: yarn install --frozen-lockfile && npx expo export --platform web
+    staticPublishPath: dist
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: EXPO_PUBLIC_BACKEND_URL
+        value: https://dailybasics-backend.onrender.com
+    routes:
+      # Single-page app: send every path to index.html so links like /order/123 work
+      - type: rewrite
+        source: /*
+        destination: /index.html
