@@ -66,7 +66,7 @@ try:
         client = AsyncMongoMockClient()
         logger.info("Using in-memory mongomock_motor database client")
     else:
-        client = AsyncIOMotorClient(MONGO_URL, tz_aware=True, serverSelectionTimeoutMS=1000)
+        client = AsyncIOMotorClient(MONGO_URL, tz_aware=True, serverSelectionTimeoutMS=10000)
 except Exception as e:
     logger.warning(f"Could not initialize MongoDB client at {MONGO_URL}: {e}. Falling back to in-memory mongomock_motor.")
     from mongomock_motor import AsyncMongoMockClient
@@ -1183,8 +1183,13 @@ async def startup():
     global client, db
     try:
         await client.admin.command('ping')
-    except Exception:
-        logger.warning(f"MongoDB connection ping failed at {MONGO_URL}. Switching to in-memory database.")
+    except Exception as e:
+        # In production, never fall back silently: an in-memory DB loses every
+        # order and payment on restart. Opt in for local demos only.
+        if os.environ.get("ALLOW_INMEMORY_DB", "false").lower() != "true":
+            logger.error(f"Cannot connect to MongoDB ({e}). Check MONGO_URL. Set ALLOW_INMEMORY_DB=true only for local demos.")
+            raise
+        logger.warning("MongoDB connection ping failed. ALLOW_INMEMORY_DB=true, so using a temporary in-memory database.")
         from mongomock_motor import AsyncMongoMockClient
         client = AsyncMongoMockClient()
         db = client[DB_NAME]
