@@ -1,0 +1,34 @@
+# Render Blueprint for the DailyBasics backend.
+# Render dashboard -> New -> Blueprint -> pick this repo. Secrets marked
+# "sync: false" are typed into the Render dashboard, never stored here.
+services:
+  - type: web
+    name: dailybasics-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    branch: Dev-AK
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: MONGO_URL
+        sync: false
+      - key: DB_NAME
+        value: dailybasics
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DEV_MOCK_OTP
+        value: "true"   # shows the OTP on screen until an SMS provider is set up
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
