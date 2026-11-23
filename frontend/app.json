@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "DailyBasic",
+    "slug": "dailybasic",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
+    "scheme": "dailybasic",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -15,7 +15,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#053E2B"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.emergent.hyperlocalcommerce.pvyxin"
@@ -23,7 +23,12 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "DailyBasic",
+      "shortName": "DailyBasic",
+      "description": "Made for everyday",
+      "themeColor": "#00452F",
+      "backgroundColor": "#053E2B"
     },
     "plugins": [
       "expo-router",
@@ -31,14 +36,15 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-image.png",
-          "imageWidth": 200,
+          "imageWidth": 240,
           "resizeMode": "contain",
-          "backgroundColor": "#000000"
+          "backgroundColor": "#053E2B"
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "description": "DailyBasic: Made for everyday"
   }
 }

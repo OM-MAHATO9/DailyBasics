@@ -98,8 +98,8 @@ function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">DB</div>
-          <div><div className="brand-name">Food Market Console</div><div className="brand-sub">DailyBasics admin</div></div>
+          <img className="brand-mark" src="/logo.png" alt="DailyBasic logo" />
+          <div><div className="brand-name">Food Market Console</div><div className="brand-sub">DailyBasic · Made for everyday</div></div>
         </div>
         <nav className="nav">
           {ROUTES.map((r) => (

@@ -116,14 +116,12 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   unit: { fontSize: 11, color: theme.colors.onMuted, marginTop: 2 },
+  // Price on top, button below at full card width: fits narrow cards without hiding the price
   priceRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     marginTop: 6,
-    gap: 4,
+    gap: 6,
   },
-  priceCol: { flex: 1, minWidth: 0 },
+  priceCol: { flexDirection: "row", alignItems: "baseline", gap: 6, flexWrap: "wrap", minWidth: 0 },
   price: {
     fontSize: isSmall ? 13 : 14,
     fontWeight: "800",
@@ -138,10 +136,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: theme.colors.brand,
     borderRadius: 7,
-    paddingHorizontal: isSmall ? 8 : 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
     backgroundColor: theme.colors.surface2,
-    flexShrink: 0,
+    alignItems: "center",
   },
   addBtnDisabled: {
     borderColor: theme.colors.border,
@@ -156,12 +153,12 @@ const styles = StyleSheet.create({
   qtyWrap: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     backgroundColor: theme.colors.brand,
     borderRadius: 7,
     overflow: "hidden",
-    flexShrink: 0,
   },
-  qBtn: { paddingHorizontal: isSmall ? 6 : 7, paddingVertical: 5 },
+  qBtn: { paddingHorizontal: 10, paddingVertical: 6 },
   qText: {
     color: "#fff",
     fontWeight: "800",

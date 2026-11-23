@@ -51,7 +51,7 @@ export default function RazorpayCheckout({ visible, order, user, onSuccess, onFa
           key: order.razorpay_key_id,
           amount: String(order.razorpay_amount_paise),
           currency: "INR",
-          name: "DailyBasics",
+          name: "DailyBasic",
           description: "Order " + order.order_number,
           order_id: order.razorpay_order_id,
           prefill: { name: user.name || "", email: user.email || "", contact: user.phone || "" },

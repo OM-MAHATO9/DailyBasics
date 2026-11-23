@@ -36,7 +36,7 @@ a { color: var(--brand); }
   display: flex; flex-direction: column; padding: 18px 12px; position: sticky; top: 0; height: 100vh;
 }
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px; }
-.brand-mark { width: 34px; height: 34px; border-radius: 9px; background: #fff; color: var(--brand); display: grid; place-items: center; font-weight: 800; }
+.brand-mark { width: 38px; height: 38px; border-radius: 10px; display: block; object-fit: cover; border: 1px solid rgba(255,255,255,.25); }
 .brand-name { font-weight: 800; font-size: 15px; line-height: 1.15; }
 .brand-sub { font-size: 11px; opacity: .75; }
 .nav { display: flex; flex-direction: column; gap: 2px; }

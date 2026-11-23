@@ -380,7 +380,7 @@ async def referral_info(user: dict = Depends(require_roles(Role.customer))):
         "reward_amount": REFERRAL_REWARD_AMOUNT,
         "min_order": REFERRAL_MIN_ORDER,
         "referred_count": referred_count,
-        "share_message": f"Hey! Try DailyBasics — fresh groceries delivered in 30 min. Use my code {code} on signup and get ₹{int(REFERRAL_REWARD_AMOUNT)} off your first order over ₹{int(REFERRAL_MIN_ORDER)}!",
+        "share_message": f"Hey! Try DailyBasic, made for everyday: groceries and food delivered in 30 min. Use my code {code} on signup and get ₹{int(REFERRAL_REWARD_AMOUNT)} off your first order over ₹{int(REFERRAL_MIN_ORDER)}!",
     }
 
 
@@ -389,7 +389,7 @@ async def check_referral_code(code: str):
     owner = await db.users.find_one({"referral_code": code.upper().strip()}, {"_id": 0, "name": 1, "referral_code": 1})
     if not owner:
         return {"valid": False}
-    return {"valid": True, "referrer_name": owner.get("name") or "a DailyBasics customer"}
+    return {"valid": True, "referrer_name": owner.get("name") or "a DailyBasic customer"}
 
 
 # ------------ CATEGORIES ------------

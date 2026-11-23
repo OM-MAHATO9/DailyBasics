@@ -196,7 +196,7 @@ export default function Checkout() {
 
           {walletBal > 0 && (
             <>
-              <Text style={styles.sec}>DailyBasics Wallet</Text>
+              <Text style={styles.sec}>DailyBasic Wallet</Text>
               <Pressable style={[styles.payOpt, useWallet && styles.payActive]} onPress={() => setUseWallet(!useWallet)} testID="use-wallet-toggle">
                 <Ionicons name="wallet" size={22} color={theme.colors.brand} />
                 <View style={{ flex: 1 }}>

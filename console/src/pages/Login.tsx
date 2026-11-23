@@ -22,9 +22,9 @@ export default function Login({ onDone }: { onDone: () => void }) {
   return (
     <div className="login">
       <form className="card" onSubmit={submit}>
-        <div className="brand-mark" style={{ background: "var(--brand)", color: "#fff" }}>DB</div>
+        <img className="brand-mark" src="/logo.png" alt="DailyBasic logo" style={{ width: 56, height: 56, borderRadius: 14 }} />
         <h1>Food Market Console</h1>
-        <p className="muted" style={{ marginTop: 0 }}>Sign in with your DailyBasics admin account.</p>
+        <p className="muted" style={{ marginTop: 0 }}>Sign in with your DailyBasic admin account.</p>
         {error && <div className="error-box">{error}</div>}
         <div style={{ display: "grid", gap: 12 }}>
           <label className="field"><span>Email</span>
