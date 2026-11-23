@@ -198,6 +198,7 @@ class ProductIn(BaseModel):
     is_bestseller: bool = False
     is_featured: bool = False
     is_active: bool = True
+    restaurant_id: Optional[str] = None  # set for food items sold by a restaurant
 
 
 # ------------ Auth helpers ------------
@@ -379,7 +380,7 @@ async def referral_info(user: dict = Depends(require_roles(Role.customer))):
         "reward_amount": REFERRAL_REWARD_AMOUNT,
         "min_order": REFERRAL_MIN_ORDER,
         "referred_count": referred_count,
-        "share_message": f"Hey! Try DailyBasics — fresh groceries delivered in 30 min. Use my code {code} on signup and get ₹{int(REFERRAL_REWARD_AMOUNT)} off your first order over ₹{int(REFERRAL_MIN_ORDER)}!",
+        "share_message": f"Hey! Try DailyBasic, made for everyday: groceries and food delivered in 30 min. Use my code {code} on signup and get ₹{int(REFERRAL_REWARD_AMOUNT)} off your first order over ₹{int(REFERRAL_MIN_ORDER)}!",
     }
 
 
@@ -388,7 +389,7 @@ async def check_referral_code(code: str):
     owner = await db.users.find_one({"referral_code": code.upper().strip()}, {"_id": 0, "name": 1, "referral_code": 1})
     if not owner:
         return {"valid": False}
-    return {"valid": True, "referrer_name": owner.get("name") or "a DailyBasics customer"}
+    return {"valid": True, "referrer_name": owner.get("name") or "a DailyBasic customer"}
 
 
 # ------------ CATEGORIES ------------
@@ -415,6 +416,7 @@ def _search_query(term: str) -> dict:
 async def list_products(
     section: Optional[str] = None,
     category_id: Optional[str] = None,
+    restaurant_id: Optional[str] = None,
     q: Optional[str] = None,
     bestseller: Optional[bool] = None,
     featured: Optional[bool] = None,
@@ -427,6 +429,8 @@ async def list_products(
         query["section"] = section
     if category_id:
         query["category_id"] = category_id
+    if restaurant_id:
+        query["restaurant_id"] = restaurant_id
     if bestseller:
         query["is_bestseller"] = True
     if featured:
@@ -515,7 +519,12 @@ async def check_delivery(pincode: str):
 
 @app.get("/api/delivery/zones")
 async def list_zones(admin: dict = Depends(require_roles(Role.admin))):
-    return await db.delivery_zones.find({}, {"_id": 0}).to_list(100)
+    zones = await db.delivery_zones.find({}).to_list(200)
+    for z in zones:
+        if not z.get("id"):
+            z["id"] = str(uuid.uuid4())
+            await db.delivery_zones.update_one({"_id": z["_id"]}, {"$set": {"id": z["id"]}})
+    return [clean(z) for z in zones]
 
 
 # ------------ COUPONS ------------
@@ -575,6 +584,12 @@ async def place_order(body: PlaceOrderIn, user: dict = Depends(require_roles(Rol
             raise HTTPException(400, f"Product unavailable")
         if p["stock"] < it.quantity:
             raise HTTPException(400, f"'{p['name']}' has only {p['stock']} in stock")
+        if p.get("restaurant_id"):
+            r = await db.restaurants.find_one({"id": p["restaurant_id"]}, {"_id": 0, "name": 1, "is_open": 1, "is_active": 1})
+            if not r or not r.get("is_active", True):
+                raise HTTPException(400, f"'{p['name']}' is no longer available")
+            if not r.get("is_open", True):
+                raise HTTPException(400, f"{r['name']} is closed right now")
         subtotal += p["price"] * it.quantity
         savings += (p["mrp"] - p["price"]) * it.quantity
         order_items.append({
@@ -865,15 +880,17 @@ async def assign_partner(order_id: str, payload: dict, admin: dict = Depends(req
     p = await db.users.find_one({"id": partner_id, "role": Role.delivery_partner.value, "is_active": True})
     if not p:
         raise HTTPException(400, "Delivery partner not found or inactive")
-    r = await db.orders.update_one(
-        {"id": order_id},
-        {
-            "$set": {"delivery_partner_id": partner_id, "delivery_partner_name": p.get("name"), "delivery_partner_phone": p.get("phone"), "status": "confirmed"},
-            "$push": {"status_history": {"status": "confirmed", "at": now().isoformat(), "by": admin["id"]}},
-        },
-    )
-    if r.matched_count == 0:
+    o = await db.orders.find_one({"id": order_id}, {"_id": 0, "status": 1})
+    if not o:
         raise HTTPException(404, "Order not found")
+    if o["status"] in ("delivered", "cancelled"):
+        raise HTTPException(400, f"Order is already {o['status']}")
+    update: dict = {"$set": {"delivery_partner_id": partner_id, "delivery_partner_name": p.get("name"), "delivery_partner_phone": p.get("phone")}}
+    # Assigning a rider confirms a new order, but never moves a later one backwards
+    if o["status"] == "placed":
+        update["$set"]["status"] = "confirmed"
+        update["$push"] = {"status_history": {"status": "confirmed", "at": now().isoformat(), "by": admin["id"]}}
+    await db.orders.update_one({"id": order_id}, update)
     return {"ok": True}
 
 
@@ -1172,6 +1189,211 @@ async def admin_customers(admin: dict = Depends(require_roles(Role.admin))):
     return users
 
 
+# ------------ RESTAURANTS ------------
+class RestaurantIn(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    cuisine: Optional[str] = ""
+    image_url: Optional[str] = ""
+    address: Optional[str] = ""
+    phone: Optional[str] = ""
+    eta_minutes: int = 30
+    is_open: bool = True     # temporarily open/closed (e.g. outside hours)
+    is_active: bool = True   # shown in the app at all
+
+
+@app.get("/api/restaurants")
+async def list_restaurants():
+    """Restaurants customers can see (closed ones are shown as closed)."""
+    return await db.restaurants.find({"is_active": True}, {"_id": 0}).sort("name", 1).to_list(500)
+
+
+@app.get("/api/restaurants/{restaurant_id}")
+async def get_restaurant(restaurant_id: str):
+    r = await db.restaurants.find_one({"id": restaurant_id, "is_active": True}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Restaurant not found")
+    return clean(r)
+
+
+@app.get("/api/admin/restaurants")
+async def admin_restaurants(admin: dict = Depends(require_roles(Role.admin))):
+    items = await db.restaurants.find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    for r in items:
+        r["product_count"] = await db.products.count_documents({"restaurant_id": r["id"]})
+    return [clean(r) for r in items]
+
+
+@app.post("/api/admin/restaurants")
+async def create_restaurant(body: RestaurantIn, admin: dict = Depends(require_roles(Role.admin))):
+    doc = body.model_dump()
+    doc.update({"id": str(uuid.uuid4()), "created_at": now()})
+    await db.restaurants.insert_one(doc)
+    return clean(doc)
+
+
+@app.put("/api/admin/restaurants/{restaurant_id}")
+async def update_restaurant(restaurant_id: str, body: RestaurantIn, admin: dict = Depends(require_roles(Role.admin))):
+    r = await db.restaurants.update_one({"id": restaurant_id}, {"$set": body.model_dump()})
+    if r.matched_count == 0:
+        raise HTTPException(404, "Restaurant not found")
+    return clean(await db.restaurants.find_one({"id": restaurant_id}, {"_id": 0}))
+
+
+@app.delete("/api/admin/restaurants/{restaurant_id}")
+async def delete_restaurant(restaurant_id: str, admin: dict = Depends(require_roles(Role.admin))):
+    """Remove a restaurant. Its menu items are hidden (not deleted) so past
+    orders still show them correctly."""
+    r = await db.restaurants.delete_one({"id": restaurant_id})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Restaurant not found")
+    hidden = await db.products.update_many({"restaurant_id": restaurant_id}, {"$set": {"is_active": False}})
+    return {"ok": True, "hidden_items": hidden.modified_count}
+
+
+# ------------ ADMIN: MENU / PRODUCTS ------------
+@app.get("/api/admin/products")
+async def admin_products(
+    admin: dict = Depends(require_roles(Role.admin)),
+    section: Optional[str] = None,
+    category_id: Optional[str] = None,
+    restaurant_id: Optional[str] = None,
+    q: Optional[str] = None,
+):
+    """All products including hidden ones, for the console."""
+    query: dict = {}
+    if section:
+        query["section"] = section
+    if category_id:
+        query["category_id"] = category_id
+    if restaurant_id:
+        query["restaurant_id"] = None if restaurant_id == "none" else restaurant_id
+    if q:
+        query.update(_search_query(q))
+    return await db.products.find(query, {"_id": 0}).sort("name", 1).to_list(2000)
+
+
+QUICK_PRODUCT_FIELDS = {"is_active": bool, "stock": int, "price": float, "mrp": float, "is_bestseller": bool, "is_featured": bool}
+
+
+@app.patch("/api/admin/products/{product_id}")
+async def quick_update_product(product_id: str, payload: dict, admin: dict = Depends(require_roles(Role.admin))):
+    """Quick edits from the menu list: show/hide, stock, price."""
+    update = {}
+    for k, cast in QUICK_PRODUCT_FIELDS.items():
+        if k in payload:
+            try:
+                update[k] = cast(payload[k])
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"Invalid value for {k}")
+    if not update:
+        raise HTTPException(400, "Nothing to update")
+    if update.get("stock", 0) < 0 or update.get("price", 0) < 0:
+        raise HTTPException(400, "Stock and price can't be negative")
+    r = await db.products.update_one({"id": product_id}, {"$set": update})
+    if r.matched_count == 0:
+        raise HTTPException(404, "Product not found")
+    return await db.products.find_one({"id": product_id}, {"_id": 0})
+
+
+# ------------ ADMIN: CATEGORIES ------------
+class CategoryIn(BaseModel):
+    name: str
+    section: str = "essentials"   # essentials | food
+    icon: Optional[str] = "pricetag"
+    image: Optional[str] = ""
+    order: int = 99
+    is_active: bool = True
+
+
+@app.get("/api/admin/categories")
+async def admin_categories(admin: dict = Depends(require_roles(Role.admin))):
+    return await db.categories.find({}, {"_id": 0}).sort([("section", 1), ("order", 1)]).to_list(500)
+
+
+@app.post("/api/admin/categories")
+async def create_category(body: CategoryIn, admin: dict = Depends(require_roles(Role.admin))):
+    doc = body.model_dump()
+    doc["id"] = str(uuid.uuid4())
+    await db.categories.insert_one(doc)
+    return clean(doc)
+
+
+@app.put("/api/admin/categories/{category_id}")
+async def update_category(category_id: str, body: CategoryIn, admin: dict = Depends(require_roles(Role.admin))):
+    r = await db.categories.update_one({"id": category_id}, {"$set": body.model_dump()})
+    if r.matched_count == 0:
+        raise HTTPException(404, "Category not found")
+    return await db.categories.find_one({"id": category_id}, {"_id": 0})
+
+
+# ------------ ADMIN: DELIVERY ZONES ------------
+class ZoneIn(BaseModel):
+    name: str
+    pincodes: list[str]
+    delivery_charge: float = 0
+    min_order_value: float = 0
+    eta_minutes: int = 30
+    is_active: bool = True
+
+
+def _clean_pincodes(pins: list[str]) -> list[str]:
+    out = []
+    for p in pins:
+        p = re.sub(r"\D", "", str(p))
+        if len(p) != 6:
+            raise HTTPException(400, f"'{p}' is not a valid 6-digit pincode")
+        if p not in out:
+            out.append(p)
+    if not out:
+        raise HTTPException(400, "Add at least one pincode")
+    return out
+
+
+@app.post("/api/admin/zones")
+async def create_zone(body: ZoneIn, admin: dict = Depends(require_roles(Role.admin))):
+    doc = body.model_dump()
+    doc.update({"id": str(uuid.uuid4()), "pincodes": _clean_pincodes(body.pincodes)})
+    await db.delivery_zones.insert_one(doc)
+    return clean(doc)
+
+
+@app.put("/api/admin/zones/{zone_id}")
+async def update_zone(zone_id: str, body: ZoneIn, admin: dict = Depends(require_roles(Role.admin))):
+    doc = body.model_dump()
+    doc["pincodes"] = _clean_pincodes(body.pincodes)
+    r = await db.delivery_zones.update_one({"id": zone_id}, {"$set": doc})
+    if r.matched_count == 0:
+        raise HTTPException(404, "Zone not found")
+    return await db.delivery_zones.find_one({"id": zone_id}, {"_id": 0})
+
+
+@app.delete("/api/admin/zones/{zone_id}")
+async def delete_zone(zone_id: str, admin: dict = Depends(require_roles(Role.admin))):
+    r = await db.delivery_zones.delete_one({"id": zone_id})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Zone not found")
+    return {"ok": True}
+
+
+# ------------ ADMIN: PAYMENTS ------------
+@app.post("/api/admin/orders/{order_id}/refund")
+async def admin_refund(order_id: str, admin: dict = Depends(require_roles(Role.admin))):
+    """Retry the Razorpay refund for a cancelled, online-paid order."""
+    o = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not o:
+        raise HTTPException(404, "Order not found")
+    if o.get("payment_method") != "online" or o.get("payment_status") not in ("paid", "refund_failed"):
+        raise HTTPException(400, "Only paid online orders can be refunded")
+    if o.get("status") != "cancelled":
+        raise HTTPException(400, "Cancel the order first, then refund")
+    await _refund_online(o)
+    o = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if o.get("payment_status") != "refunded":
+        raise HTTPException(502, "Refund failed at Razorpay. Try again or refund from the Razorpay dashboard.")
+    return clean(o)
+
+
 @app.get("/")
 async def root():
     return {"service": "DailyBasics API", "status": "ok"}
@@ -1200,6 +1422,8 @@ async def startup():
     await db.otp_challenges.create_index("expires_at", expireAfterSeconds=0)
     await db.products.create_index([("name", 1)])
     await db.products.create_index([("category_id", 1)])
+    await db.products.create_index([("restaurant_id", 1)])
+    await db.restaurants.create_index([("id", 1)], unique=True)
     await db.orders.create_index([("user_id", 1)])
     await db.orders.create_index([("delivery_partner_id", 1)])
     await db.coupon_redemptions.create_index([("user_id", 1), ("code", 1)], unique=True)

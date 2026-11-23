@@ -28,7 +28,7 @@ export default function RazorpayCheckout({ visible, order, user, onSuccess, onFa
     key: ${JSON.stringify(order.razorpay_key_id)},
     amount: ${JSON.stringify(String(order.razorpay_amount_paise))},
     currency: "INR",
-    name: "DailyBasics",
+    name: "DailyBasic",
     description: "Order " + ${JSON.stringify(order.order_number)},
     order_id: ${JSON.stringify(order.razorpay_order_id)},
     prefill: {

@@ -63,7 +63,7 @@ class TwilioVerifySms(SmsProvider):
         data = {
             "To": e164,
             "From": os.environ.get("TWILIO_SMS_FROM", ""),
-            "Body": f"Your DailyBasics OTP is {code}. Valid for 5 minutes.",
+            "Body": f"Your DailyBasic OTP is {code}. Valid for 5 minutes.",
         }
         async with httpx.AsyncClient(timeout=10) as c:
             r = await c.post(url, data=data, auth=auth)
@@ -168,7 +168,7 @@ async def send_wa_safe(phone: str, body: str) -> None:
 # ----------------- Message templates -----------------
 def tpl_order_confirmed(name: str, order_number: str, total: float, eta: int) -> str:
     return (
-        f"Hi {name or 'there'}! 🛒 Your DailyBasics order #{order_number} for ₹{int(total)} is confirmed. "
+        f"Hi {name or 'there'}! 🛒 Your DailyBasic order #{order_number} for ₹{int(total)} is confirmed. "
         f"Estimated delivery: {eta} min. Track live in the app."
     )
 
@@ -181,11 +181,11 @@ def tpl_out_for_delivery(order_number: str, partner_name: str, partner_phone: st
 
 
 def tpl_delivered(order_number: str) -> str:
-    return f"✅ Your DailyBasics order #{order_number} was delivered. Please rate your experience in the app!"
+    return f"✅ Your DailyBasic order #{order_number} was delivered. Please rate your experience in the app!"
 
 
 def tpl_referral_reward(name: str, amount: int, friend: str) -> str:
     return (
-        f"🎉 Hi {name or 'there'}! Your friend {friend} placed their first DailyBasics order. "
+        f"🎉 Hi {name or 'there'}! Your friend {friend} placed their first DailyBasic order. "
         f"You've earned ₹{amount} wallet credit — auto-applied on your next order."
     )

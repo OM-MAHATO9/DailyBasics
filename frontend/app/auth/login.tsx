@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, auth, Role } from "@/src/lib/api";
@@ -110,11 +111,9 @@ export default function Login() {
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.hero}>
-            <View style={styles.logo}>
-              <Ionicons name="basket" size={40} color={theme.colors.brand} />
-            </View>
-            <Text style={styles.brand}>DailyBasics</Text>
-            <Text style={styles.tagline}>Fresh groceries at your doorstep</Text>
+            <Image source={require("@/assets/images/logo.png")} style={styles.logo} contentFit="cover" accessibilityLabel="DailyBasic logo" />
+            <Text style={styles.brand}>DailyBasic</Text>
+            <Text style={styles.tagline}>Made for everyday</Text>
           </View>
 
           <View style={[styles.card, { marginBottom: insets.bottom + 16 }]}>
@@ -297,8 +296,8 @@ function BackBtn({ onPress }: any) {
 const styles = StyleSheet.create({
   hero: { alignItems: "center", paddingHorizontal: 24, marginBottom: 24 },
   logo: {
-    width: 84, height: 84, borderRadius: 24, backgroundColor: "#fff",
-    alignItems: "center", justifyContent: "center", marginBottom: 16, ...theme.shadow.strong,
+    width: 96, height: 96, borderRadius: 24, marginBottom: 16,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.25)", ...theme.shadow.strong,
   },
   brand: { color: "#fff", fontSize: 32, fontWeight: "800", letterSpacing: 0.5 },
   tagline: { color: "rgba(255,255,255,0.9)", fontSize: 16, marginTop: 6 },

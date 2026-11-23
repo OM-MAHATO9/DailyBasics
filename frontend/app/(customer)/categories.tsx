@@ -107,7 +107,8 @@ const styles = StyleSheet.create({
     borderBottomColor: theme.colors.divider,
   },
   title: { fontSize: 20, fontWeight: "800", color: theme.colors.on },
-  side: { backgroundColor: theme.colors.surface3 },
+  // flexGrow/flexShrink 0: on web a ScrollView grows by default, which squeezed the products
+  side: { backgroundColor: theme.colors.surface3, flexGrow: 0, flexShrink: 0 },
   sideItem: {
     paddingVertical: 14,
     paddingHorizontal: 8,

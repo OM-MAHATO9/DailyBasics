@@ -1,0 +1,17 @@
+{
+  "name": "food-market-console",
+  "private": true,
+  "version": "1.0.0",
+  "description": "DailyBasics admin console: orders, menu, restaurants, payments, delivery areas and riders.",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --serve"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

@@ -52,7 +52,7 @@ export default function Profile() {
         {/* Wallet card */}
         <View style={styles.walletCard} testID="wallet-card">
           <View style={{ flex: 1 }}>
-            <Text style={styles.walletLabel}>DailyBasics Wallet</Text>
+            <Text style={styles.walletLabel}>DailyBasic Wallet</Text>
             <Text style={styles.walletBalance}>{formatINR(wallet?.balance ?? 0)}</Text>
             <Text style={styles.walletHint}>Auto-applied at checkout</Text>
           </View>
