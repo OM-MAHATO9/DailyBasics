@@ -35,18 +35,21 @@ export default function Home() {
   const [featured, setFeatured] = useState<any[]>([]);
   const [bestsellers, setBestsellers] = useState<any[]>([]);
   const [all, setAll] = useState<any[]>([]);
+  const [restaurants, setRestaurants] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [cats, feat, best, prods] = await Promise.all([
+      const [cats, feat, best, prods, rests] = await Promise.all([
         api.categories(section),
         api.products({ section, featured: true, limit: 10 }),
         api.products({ section, bestseller: true, limit: 10 }),
         api.products({ section, limit: 20 }),
+        section === "food" ? api.restaurants().catch(() => []) : Promise.resolve([]),
       ]);
+      setRestaurants(rests);
       setCategories(cats);
       setFeatured(feat);
       setBestsellers(best);
@@ -151,6 +154,43 @@ export default function Home() {
               />
             </View>
 
+            {/* Restaurants (Food section) */}
+            {section === "food" && restaurants.length > 0 && (
+              <Section title="Restaurants">
+                <FlatList
+                  data={restaurants}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}
+                  keyExtractor={(r) => r.id}
+                  renderItem={({ item: r }) => (
+                    <Pressable
+                      style={styles.restCard}
+                      onPress={() => router.push({ pathname: "/(customer)/restaurant/[id]", params: { id: r.id } })}
+                      testID={`rest-${r.id}`}
+                    >
+                      <View>
+                        {r.image_url ? (
+                          <Image source={{ uri: r.image_url }} style={styles.restImg} contentFit="cover" />
+                        ) : (
+                          <View style={[styles.restImg, styles.restImgEmpty]}>
+                            <Ionicons name="restaurant" size={28} color={theme.colors.brand} />
+                          </View>
+                        )}
+                        {!r.is_open && (
+                          <View style={styles.restClosed}><Text style={styles.restClosedText}>Closed</Text></View>
+                        )}
+                      </View>
+                      <Text style={styles.restName} numberOfLines={1}>{r.name}</Text>
+                      <Text style={styles.restMeta} numberOfLines={1}>
+                        {[r.cuisine, `${r.eta_minutes} min`].filter(Boolean).join(" · ")}
+                      </Text>
+                    </Pressable>
+                  )}
+                />
+              </Section>
+            )}
+
             {/* Categories */}
             {categories.length > 0 && (
               <Section title="Shop by Category">
@@ -240,6 +280,13 @@ const GRID_H_PAD = 16;
 const GRID_ITEM_W = Math.floor((SCREEN_WIDTH - GRID_H_PAD * 2 - GRID_GAP) / 2);
 
 const styles = StyleSheet.create({
+  restCard: { width: 150 },
+  restImg: { width: 150, height: 96, borderRadius: 12, backgroundColor: theme.colors.brandLight },
+  restImgEmpty: { alignItems: "center", justifyContent: "center" },
+  restClosed: { position: "absolute", top: 6, left: 6, backgroundColor: "rgba(0,0,0,0.7)", borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  restClosedText: { color: "#fff", fontSize: 11, fontWeight: "700" },
+  restName: { marginTop: 6, fontSize: 14, fontWeight: "700", color: theme.colors.on },
+  restMeta: { fontSize: 12, color: theme.colors.onMuted },
   header: {
     backgroundColor: theme.colors.surface2,
     paddingBottom: 4,

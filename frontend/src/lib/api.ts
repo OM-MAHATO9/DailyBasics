@@ -60,6 +60,8 @@ export const api = {
     return req<any[]>(`/api/products${qs ? `?${qs}` : ""}`);
   },
   product: (id: string) => req<any>(`/api/products/${id}`),
+  restaurants: () => req<any[]>("/api/restaurants"),
+  restaurant: (id: string) => req<any>(`/api/restaurants/${id}`),
   checkDelivery: (pin: string) => req<any>(`/api/delivery/check/${pin}`),
 
   // Customer
